@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!--
+  Full panel — swapped into #ai-panel when the panel is open.
+  Polled every 5 s via hx-trigger="load, every 5s" on the inner refresh span.
+-->
+<aside th:fragment="panel"
+       id="ai-panel"
+       class="ai-panel"
+       th:classappend="${stats.pending + stats.processing > 0} ? ' ai-panel--active' : ''">
+
+  <div class="ai-panel-header">
+    <span class="ai-panel-title">
+      <i class="bi bi-cpu"></i> AI Processing
+    </span>
+    <button class="ai-panel-close"
+            type="button"
+            title="Close panel"
+            onclick="aiPanelClose()">
+      <i class="bi bi-x-lg"></i>
+    </button>
+  </div>
+
+  <!-- Live-refresh trigger (invisible) -->
+  <span id="ai-panel-refresh"
+        hx-get="/assets/ai-panel"
+        hx-target="#ai-panel"
+        hx-swap="outerHTML"
+        hx-trigger="every 5s"
+        aria-hidden="true"></span>
+
+  <div class="ai-panel-body">
+
+    <!-- Progress bar -->
+    <div th:with="total=${stats.pending + stats.processing + stats.complete + stats.failed + stats.cancelled},
+                  done=${stats.complete + stats.failed + stats.cancelled},
+                  pct=${total > 0 ? (done * 100 / total) : 0}">
+      <div class="ai-panel-progress-label">
+        <span th:if="${stats.pending + stats.processing > 0}">
+            <!-- Running badge replaced by a same-size action button to halt all AI jobs -->
+            <button id="ai-halt-btn"
+                    class="ai-badge ai-badge--running"
+                    type="button"
+                    hx-post="/assets/ai/halt"
+                    hx-swap="none"
+                    hx-confirm="Halt all AI jobs?"
+                    onclick="aiHaltAll();">
+              <i class="bi bi-arrow-repeat ai-spin"></i> Halt all
+            </button>
+        </span>
+        <span th:if="${stats.pending + stats.processing == 0 and total > 0}">
+          <span class="ai-badge ai-badge--done">
+            <i class="bi bi-check-circle"></i> Complete
+          </span>
+        </span>
+        <span class="ai-panel-pct" th:text="${pct} + '%'"></span>
+      </div>
+      <div class="ai-progress-track">
+        <div class="ai-progress-bar"
+             th:style="'width:' + ${pct} + '%'"
+             th:classappend="${stats.pending + stats.processing > 0} ? ' ai-progress-bar--running' : ' ai-progress-bar--done'"></div>
+      </div>
+    </div>
+
+    <!-- Stats grid -->
+    <div class="ai-stats-grid">
+      <div class="ai-stat">
+        <span class="ai-stat-value ai-stat--pending" th:text="${stats.pending}">0</span>
+        <span class="ai-stat-label">Pending</span>
+      </div>
+      <div class="ai-stat">
+        <span class="ai-stat-value ai-stat--processing" th:text="${stats.processing}">0</span>
+        <span class="ai-stat-label">Processing</span>
+      </div>
+      <div class="ai-stat">
+        <span class="ai-stat-value ai-stat--complete" th:text="${stats.complete}">0</span>
+        <span class="ai-stat-label">Complete</span>
+      </div>
+      <div class="ai-stat">
+        <span class="ai-stat-value ai-stat--cancelled" th:text="${stats.cancelled}">0</span>
+        <span class="ai-stat-label">Cancelled</span>
+      </div>
+      <div class="ai-stat">
+        <span class="ai-stat-value ai-stat--failed" th:text="${stats.failed}">0</span>
+        <span class="ai-stat-label">Failed</span>
+      </div>
+    </div>
+
+    <!-- Status message -->
+    <p class="ai-panel-msg"
+       th:if="${stats.pending + stats.processing > 0}"
+       th:text="'Processing ' + ${stats.pending + stats.processing} + ' image(s) in the background…'">
+    </p>
+    <p class="ai-panel-msg ai-panel-msg--done"
+       th:if="${stats.pending + stats.processing == 0 and stats.complete + stats.failed + stats.cancelled > 0}">
+      All done — you can close this panel.
+    </p>
+    <p class="ai-panel-msg" th:if="${stats.complete + stats.failed + stats.cancelled + stats.pending + stats.processing == 0}">
+      No AI jobs queued yet.
+    </p>
+
+  </div>
+</aside>
+
+<script>
+  // Fallback JS for halting AI jobs if htmx is not available or JS-only flow is used.
+  function aiHaltAll() {
+    var btn = document.getElementById('ai-halt-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    var old = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-stop-fill"></i> Halting...';
+
+    // Send a POST to the server. The template already has an hx-post on the button
+    // so if htmx is available that will also send a request. This fetch is a
+    // progressive-enhancement fallback.
+    // Include CSRF token header if available as meta tags (Spring CSRF support)
+    var headers = { 'Content-Type': 'application/json' };
+    var csrfTokenMeta = document.querySelector('meta[name="_csrf"]');
+    var csrfHeaderMeta = document.querySelector('meta[name="_csrf_header"]');
+    if (csrfTokenMeta) {
+      var headerName = csrfHeaderMeta ? csrfHeaderMeta.content : 'X-CSRF-TOKEN';
+      headers[headerName] = csrfTokenMeta.content;
+    }
+
+    fetch('/assets/ai/halt', { method: 'POST', headers: headers, body: '{}' })
+      .then(function (resp) {
+        if (resp.ok) {
+          btn.innerHTML = '<i class="bi bi-check-circle"></i> Halted';
+        } else {
+          btn.disabled = false;
+          btn.innerHTML = old;
+          console.error('Halt request failed', resp.status, resp.statusText);
+          alert('Failed to halt AI jobs (status ' + resp.status + ')');
+        }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.innerHTML = old;
+        console.error('Halt request error', err);
+        alert('Error halting AI jobs: ' + err);
+      });
+  }
+</script>
+
+</body>
+</html>

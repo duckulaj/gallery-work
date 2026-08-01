@@ -1,0 +1,83 @@
+<aside th:fragment="sidebar" class="file-sidebar">
+  <div class="file-sidebar-brand">
+    <i class="bi bi-images"></i> Gallery
+  </div>
+  <nav class="file-tree" id="album-tree">
+    <th:block th:replace="~{fragments/sidebar :: albumNodes(nodes=${albumTree})}"></th:block>
+  </nav>
+  <div class="file-sidebar-footer">
+    <a class="faces-nav-link" th:href="@{/review}">
+      <i class="bi bi-shield-exclamation"></i><span>Sensitive review</span>
+    </a>
+    <!-- Unidentified faces link -->
+    <a class="faces-nav-link"
+       th:classappend="${unidentifiedFaceCount != null and unidentifiedFaceCount > 0} ? ' faces-nav-link--alert' : ''"
+       hx-get="/faces/unidentified"
+       hx-target="#asset-grid"
+       hx-swap="outerHTML"
+       hx-push-url="false"
+       href="/faces/unidentified">
+      <i class="bi bi-person-bounding-box"></i>
+      <span>Faces</span>
+      <span th:if="${unidentifiedFaceCount != null and unidentifiedFaceCount > 0}"
+            class="faces-nav-badge"
+            th:text="${unidentifiedFaceCount}"></span>
+    </a>
+
+    <button class="file-add-btn" type="button"
+            onclick="document.getElementById('add-album-form').classList.toggle('show')"
+            title="New album">
+      <i class="bi bi-folder-plus"></i> New album
+    </button>
+    <form id="add-album-form" class="file-add-form"
+          hx-post="/albums"
+          hx-include="#add-album-form input">
+      <input type="hidden" name="returnFolderId" th:value="${folder.id}">
+      <div class="input-group input-group-sm">
+        <input name="name" class="form-control form-control-sm file-add-input"
+               placeholder="Album name…" autocomplete="off" required>
+        <button class="btn btn-sm btn-outline-secondary" type="submit">
+          <i class="bi bi-check-lg"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+                onclick="document.getElementById('add-album-form').classList.remove('show')">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </form>
+  </div>
+</aside>
+
+<th:block th:fragment="albumNodes(nodes)">
+  <div th:each="node : ${nodes}" class="file-tree-item">
+    <div class="file-tree-row"
+         th:id="|row-${node.folder.id}|"
+         th:classappend="${node.folder.id == folder.id} ? ' active' : ''">
+      <button th:unless="${#lists.isEmpty(node.children)}"
+              class="file-tree-toggle"
+              type="button"
+              data-bs-toggle="collapse"
+              th:attr="data-bs-target='#ch-' + ${node.folder.id},
+                       aria-expanded=${node.containsActive ? 'true' : 'false'},
+                       aria-controls='ch-' + ${node.folder.id}">
+        <i class="bi bi-chevron-right file-tree-chevron"></i>
+      </button>
+      <span th:if="${#lists.isEmpty(node.children)}" class="file-tree-leaf-spacer"></span>
+      <i class="bi file-tree-folder-icon"
+         th:classappend="${node.containsActive or node.folder.id == folder.id} ? ' bi-folder2-open' : ' bi-folder'"></i>
+      <a class="file-tree-label"
+         th:classappend="${node.folder.id == folder.id} ? ' active' : ''"
+         th:text="${node.folder.name}"
+         th:attr="hx-get=@{/folders/{id}(id=${node.folder.id})}"
+         hx-target="#gallery-main"
+         hx-swap="outerHTML"
+         hx-push-url="true"></a>
+    </div>
+    <div th:unless="${#lists.isEmpty(node.children)}"
+         class="collapse file-tree-children"
+         th:id="|ch-${node.folder.id}|"
+         th:classappend="${node.containsActive} ? ' show' : ''">
+      <th:block th:replace="~{fragments/sidebar :: albumNodes(nodes=${node.children})}"></th:block>
+    </div>
+  </div>
+</th:block>

@@ -1,0 +1,26 @@
+<section th:fragment="grid" id="asset-grid" class="grid-wrap" hx-history-elt>
+  <div class="alert alert-info py-2" th:if="${notice != null}" th:text="${notice}"></div>
+  <div id="drop-zone" class="drop-zone">
+    <div class="empty" th:if="${#lists.isEmpty(assets)}">No images in this folder.</div>
+    <div class="masonry" th:if="${!#lists.isEmpty(assets)}">
+      <article class="thumb" th:each="asset : ${assets}" th:data-id="${asset.id}">
+        <input class="select form-check-input" type="checkbox" name="ids" th:value="${asset.id}" aria-label="Select image">
+        <!-- Unidentified-face badge -->
+        <span th:if="${unidentifiedFaceAssets != null and unidentifiedFaceAssets.contains(asset.id)}"
+              class="face-badge face-badge--unknown"
+              title="Contains unidentified faces — click to identify">
+          <i class="bi bi-person-fill-exclamation"></i>
+        </span>
+        <button class="thumb-button"
+                type="button"
+                th:hx-get="@{/assets/{id}/preview(id=${asset.id})}"
+                hx-target="#preview"
+                hx-swap="innerHTML"
+                hx-indicator="#toolbar-indicator">
+          <img loading="lazy" th:src="@{/thumbs/{id}(id=${asset.id})}" th:alt="${asset.filename}">
+        </button>
+        <div class="name" th:text="${asset.filename}"></div>
+      </article>
+    </div>
+  </div>
+</section>

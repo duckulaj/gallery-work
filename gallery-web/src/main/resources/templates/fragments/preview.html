@@ -1,0 +1,130 @@
+<section th:fragment="preview" class="modal-backdrop-custom" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+  <div class="preview-card">
+    <button class="close" type="button" aria-label="Close preview" onclick="document.getElementById('preview').innerHTML=''">×</button>
+    <img class="hero" th:src="@{/files/{id}(id=${asset.id})}" th:alt="${asset.filename}">
+    <h2 id="preview-title" th:text="${asset.filename}"></h2>
+    <p class="text-secondary" th:text="${asset.width + ' × ' + asset.height + ' • ' + asset.sizeBytes + ' bytes'}"></p>
+    <div th:if="${meta != null && meta.aiStatus != null}" class="small text-secondary mb-2">
+      <span class="badge text-bg-secondary me-1">AI</span>
+      <span th:text="${meta.aiStatus}"></span>
+      <span th:if="${meta.aiModel != null && !#strings.isEmpty(meta.aiModel)}" th:text="${' • ' + meta.aiModel}"></span>
+      <span th:if="${meta.aiError != null && !#strings.isEmpty(meta.aiError)}" class="text-danger" th:text="${' • ' + meta.aiError}"></span>
+    </div>
+    <p th:if="${meta != null && meta.aiCaption != null}" th:text="${meta.aiCaption}"></p>
+
+    <div class="ai-meta mt-3 p-3 rounded bg-dark bg-opacity-25 border border-secondary border-opacity-25" th:if="${meta != null}">
+      <div th:if="${meta.sceneType != null && !#strings.isEmpty(meta.sceneType)}" class="mb-2">
+        <span class="badge rounded-pill text-bg-primary px-3">Scene</span>
+        <span class="ms-2 fw-semibold" th:text="${meta.sceneType}"></span>
+      </div>
+      
+      <div class="row g-3">
+        <div th:if="${meta.sceneLabels != null && !#strings.isEmpty(meta.sceneLabels)}" class="col-12 small text-secondary">
+          <strong class="text-light">Scene labels:</strong> <span th:text="${meta.sceneLabels}"></span>
+        </div>
+        
+        <div th:if="${meta.faceCount != null && meta.faceCount > 0}" class="col-sm-6 small text-secondary">
+          <strong class="text-light">Faces:</strong> <span th:text="${meta.faceCount}"></span>
+        </div>
+        
+        <div th:if="${!#strings.isEmpty(meta.faceNamesDisplay)}" class="col-sm-6 small text-secondary">
+          <strong class="text-light">Recognised people:</strong> <span th:text="${meta.faceNamesDisplay}"></span>
+        </div>
+        
+        <div th:if="${!#strings.isEmpty(meta.faceDescriptionsDisplay)}" class="col-12 small text-secondary">
+          <strong class="text-light">Face descriptors:</strong> <span th:text="${meta.faceDescriptionsDisplay}"></span>
+        </div>
+        
+        <div th:if="${meta.dominantColors != null && !#strings.isEmpty(meta.dominantColors)}" class="col-12 small text-secondary">
+          <strong class="text-light">Colours:</strong> <span th:text="${meta.dominantColors}"></span>
+        </div>
+      </div>
+      
+      <!-- AI Timings -->
+      <div th:if="${meta.timingTotalMs != null}" class="mt-3 pt-2 border-top border-secondary border-opacity-10">
+        <div class="small text-secondary opacity-50 d-flex flex-wrap gap-2" style="font-size: 0.7rem;">
+          <span th:if="${meta.timingExifMs != null}" th:text="'EXIF: ' + ${meta.timingExifMs} + 'ms'"></span>
+          <span th:if="${meta.timingAiMs != null}" th:text="'AI: ' + ${meta.timingAiMs} + 'ms'"></span>
+          <span th:if="${meta.timingFaceMs != null}" th:text="'Face: ' + ${meta.timingFaceMs} + 'ms'"></span>
+          <span th:if="${meta.timingEmbedMs != null}" th:text="'Embed: ' + ${meta.timingEmbedMs} + 'ms'"></span>
+          <span class="ms-auto" th:text="'Total: ' + ${meta.timingTotalMs} + 'ms'"></span>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="alert alert-success py-2 mt-2" th:if="${notice != null}" th:text="${notice}"></div>
+
+    <div class="known-face-panel mt-3" th:if="${meta != null}">
+      <!-- ── DeepFace detections ── -->
+      <div th:if="${faceDetections != null and !#lists.isEmpty(faceDetections)}" class="mb-3">
+        <h3 class="h6 mb-2"><i class="bi bi-person-bounding-box"></i> Detected faces</h3>
+        <div class="face-crops-row">
+          <div th:each="fd, iter : ${faceDetections}" class="face-crop-card">
+            <img th:src="@{/faces/crops/{id}(id=${fd.id})}"
+                 alt="Face crop"
+                 class="face-crop-img"
+                 onerror="this.parentElement.style.display='none'">
+            <div class="face-crop-label">
+              <span th:if="${fd.personName != null}"
+                    class="badge text-bg-success face-crop-name"
+                    th:text="${fd.personName}"></span>
+              <span th:if="${fd.personName == null}"
+                    class="badge text-bg-warning face-crop-name">Unknown</span>
+            </div>
+            <!-- Identify form (shown for unidentified faces) -->
+            <form th:if="${fd.personName == null}"
+                  class="face-identify-form mt-1"
+                  th:hx-post="@{/faces/detections/{id}/identify(id=${fd.id})}"
+                  hx-target="#preview"
+                  hx-swap="innerHTML"
+                  hx-indicator="#toolbar-indicator">
+              <input type="hidden" name="assetId" th:value="${asset.id}">
+              <input class="form-control form-control-sm face-identify-input"
+                     name="displayName"
+                     list="known-person-names"
+                     placeholder="Who is this?"
+                     autocomplete="off"
+                     required>
+              <button class="btn btn-xs btn-primary w-100 mt-1" type="submit">Identify</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="h6 mb-2">Known faces</h3>
+      <form class="row g-2 align-items-end"
+            hx-post="/faces/known"
+            hx-target="#preview"
+            hx-swap="innerHTML"
+            hx-indicator="#toolbar-indicator">
+        <input type="hidden" name="assetId" th:value="${asset.id}">
+        <div class="col-sm-5">
+          <label class="form-label small mb-1">Person name</label>
+          <input class="form-control form-control-sm" name="displayName" list="known-person-names" placeholder="e.g. John Smith" required>
+          <datalist id="known-person-names">
+            <option th:each="person : ${knownPersons}" th:value="${person.displayName}"></option>
+          </datalist>
+        </div>
+        <div class="col-sm-5">
+          <label class="form-label small mb-1">Face description / example notes</label>
+          <input class="form-control form-control-sm" name="faceDescription"
+                 th:value="${meta.faceDescriptionsDisplay}"
+                 placeholder="Optional; helps future matching">
+        </div>
+        <div class="col-sm-2">
+          <button class="btn btn-sm btn-primary w-100" type="submit">Tag face</button>
+        </div>
+      </form>
+      <p class="small text-secondary mt-2 mb-0">
+        Tagging a face stores a local known-person example. Future background AI jobs receive those examples as recognition context.
+      </p>
+      <div class="small text-secondary mt-1" th:if="${knownPersons != null && !#lists.isEmpty(knownPersons)}">
+        <strong>Known people:</strong>
+        <span th:each="person, iter : ${knownPersons}" th:text="${person.displayName + ' (' + person.examples + ')' + (iter.last ? '' : ', ')}"></span>
+      </div>
+    </div>
+
+    <a class="btn btn-sm btn-outline-light mt-3" th:href="@{/files/{id}(id=${asset.id})}" target="_blank" rel="noopener">Open original</a>
+  </div>
+</section>

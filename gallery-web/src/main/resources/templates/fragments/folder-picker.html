@@ -1,0 +1,52 @@
+<!-- Fragment returned by GET /browse?path=… and swapped into #picker-content -->
+<div th:fragment="picker-content"
+     xmlns:th="http://www.thymeleaf.org"
+     id="picker-content"
+     class="fp-content">
+
+  <!-- Current path breadcrumb -->
+  <div class="fp-path" th:text="${currentPath}"></div>
+
+  <!-- Directory list -->
+  <ul class="fp-list">
+
+    <!-- "Up" entry -->
+    <li th:if="${parentPath != null}">
+      <button class="fp-dir fp-up"
+              type="button"
+              th:hx-get="@{/browse(path=${parentPath})}"
+              hx-target="#picker-content"
+              hx-swap="outerHTML">
+        <i class="bi bi-arrow-up-short"></i> ..
+      </button>
+    </li>
+
+    <!-- Sub-directories (DirEntry records: name, path) -->
+    <li th:each="sub : ${subdirs}">
+      <button class="fp-dir"
+              type="button"
+              th:hx-get="@{/browse(path=${sub.path})}"
+              hx-target="#picker-content"
+              hx-swap="outerHTML">
+        <i class="bi bi-folder"></i>
+        <span th:text="${sub.name}"></span>
+      </button>
+    </li>
+
+    <li th:if="${#lists.isEmpty(subdirs)}">
+      <span class="fp-empty">No sub-folders here</span>
+    </li>
+
+  </ul>
+
+  <!-- Select current directory -->
+  <div class="fp-actions">
+    <button type="button"
+            class="icon fp-select"
+            th:attr="data-path=${currentPath}"
+            onclick="fpSelect(this)">
+      <i class="bi bi-check-lg"></i> Select this folder
+    </button>
+  </div>
+
+</div>

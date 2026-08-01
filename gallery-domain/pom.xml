@@ -1,0 +1,5 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><parent><groupId>com.hawkins</groupId><artifactId>gallery-parent</artifactId><version>1.0.0-SNAPSHOT</version></parent><artifactId>gallery-domain</artifactId><dependencies>
+<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
+<dependency><groupId>org.hibernate.orm</groupId><artifactId>hibernate-vector</artifactId><version>${hibernate.version}</version></dependency>
+<dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
+</dependencies></project>

@@ -1,0 +1,125 @@
+<div th:fragment="toolbar" class="toolbar flex-wrap">
+  <input type="hidden" name="folderId" th:value="${folder.id}">
+
+  <input class="search form-control"
+         name="q"
+         placeholder="Filter or AI search…"
+         autocomplete="off"
+         hx-get="/assets"
+         hx-trigger="input changed delay:350ms, search"
+         hx-target="#asset-grid"
+         hx-swap="outerHTML"
+         hx-include="[name=folderId], [name=q]"
+         hx-indicator="#toolbar-indicator">
+
+
+  <form id="directory-index"
+        class="directory-index d-inline-flex align-items-center gap-2"
+        hx-post="/assets/index-directory"
+        hx-target="#asset-grid"
+        hx-swap="outerHTML"
+        hx-include="[name=folderId], [name=q]"
+        hx-indicator="#toolbar-indicator"
+        hx-on::after-request="aiPanelOpen()">
+
+    <!-- Hidden input that carries the chosen path to the server -->
+    <input type="hidden" name="directoryPath" id="directory-path-value">
+
+    <!-- Picker trigger + display -->
+    <div class="fp-wrapper" id="fp-wrapper">
+      <button class="fp-trigger icon"
+              type="button"
+              id="fp-trigger-btn"
+              onclick="fpToggle()"
+              title="Browse server folders">
+        <i class="bi bi-folder2-open"></i>
+        <span id="fp-label">Choose folder…</span>
+        <i class="bi bi-chevron-down fp-chevron"></i>
+      </button>
+
+      <!-- Dropdown panel — loaded lazily via HTMX -->
+      <div class="fp-dropdown" id="fp-dropdown" hidden>
+        <div id="picker-content" class="fp-content">
+          <div class="fp-empty">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <label class="recursive form-check-label d-inline-flex align-items-center gap-1 mb-0">
+      <input class="form-check-input mt-0" type="checkbox" name="recursive" value="true" checked>
+      Recursive
+    </label>
+    <button class="icon" type="submit" id="index-dir-btn" disabled>Index directory</button>
+  </form>
+
+  <button type="button"
+          class="icon"
+          hx-post="/assets/reindex-ai"
+          hx-target="#asset-grid"
+          hx-swap="outerHTML"
+          hx-include="[name=folderId], [name=q]"
+          hx-confirm="Queue all images in this folder for background AI facial and scene analysis?"
+          hx-indicator="#toolbar-indicator"
+          hx-on::after-request="aiPanelOpen()">
+    Queue full AI re-index
+  </button>
+
+  <button type="button"
+          class="icon"
+          hx-post="/assets/queue-missing-ai"
+          hx-target="#asset-grid"
+          hx-swap="outerHTML"
+          hx-include="[name=folderId], [name=q]"
+          hx-indicator="#toolbar-indicator"
+          hx-on::after-request="aiPanelOpen()">
+    Queue missing AI
+  </button>
+
+
+  <button type="button"
+          class="icon"
+          hx-post="/faces/queue-recognition"
+          hx-target="#asset-grid"
+          hx-swap="outerHTML"
+          hx-include="[name=folderId], [name=q]"
+          hx-confirm="Queue this folder so background AI can apply the latest known-face labels?"
+          hx-indicator="#toolbar-indicator"
+          hx-on::after-request="aiPanelOpen()">
+    Apply known faces
+  </button>
+
+  <span th:replace="~{fragments/toolbar :: aiStatus}"></span>
+
+  <button type="button"
+          class="icon"
+          hx-post="/assets/delete"
+          hx-target="#asset-grid"
+          hx-swap="outerHTML"
+          hx-include="[name=folderId], [name=q], #asset-grid .select:checked"
+          hx-confirm="Delete selected images?"
+          hx-indicator="#toolbar-indicator">
+    Delete
+  </button>
+
+  <button type="button"
+          class="icon btn-danger"
+          th:if="${!(folder.parent == null && folder.name == 'Gallery')}"
+          th:attr="hx-delete=@{/albums/{id}(id=${folder.id})}"
+          hx-confirm="Delete this entire album and all its images? This cannot be undone."
+          hx-indicator="#toolbar-indicator">
+    <i class="bi bi-folder-x"></i> Delete Album
+  </button>
+
+  <span id="toolbar-indicator" class="htmx-indicator spinner-border spinner-border-sm" aria-hidden="true"></span>
+
+</div>
+
+<span th:fragment="aiStatus"
+      id="ai-status"
+      class="small text-muted"
+      hx-get="/assets/ai-status"
+      hx-trigger="load, every 10s"
+      hx-swap="outerHTML"
+      th:text="${aiStats != null ? aiStats.summary() : 'AI queue: calculating…'}">
+  AI queue: calculating…
+</span>

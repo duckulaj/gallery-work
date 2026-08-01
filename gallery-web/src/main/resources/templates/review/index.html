@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Private Photo Review</title>
+  <link rel="stylesheet" th:href="@{/css/review-workspace.css}">
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <script th:src="@{/js/review-workspace.js}" defer></script>
+</head>
+<body>
+<header class="appbar">
+  <div><strong>Gallery</strong><span>Private Photo Review</span></div>
+  <nav><a href="/">Photos</a><a class="active" href="/review">Review</a><a href="/imports">Imports</a><a href="/processing">Processing</a></nav>
+</header>
+<main class="review-shell" id="workspace" th:fragment="workspace">
+  <section class="source-strip">
+    <div><span class="label">Library</span><strong>Unified local and Google Photos assets</strong></div>
+    <div><span class="label">Quarantine</span><strong>Configured private quarantine folder</strong></div>
+  </section>
+
+  <section class="review-toolbar">
+    <select id="filter" name="filter" th:value="${filter}" onchange="Review.reload()">
+      <option th:selected="${filter=='Flagged'}">Flagged</option><option th:selected="${filter=='All'}">All</option>
+      <option th:selected="${filter=='Pending'}">Pending</option><option th:selected="${filter=='Kept'}">Kept</option>
+      <option th:selected="${filter=='Quarantined'}">Quarantined</option><option th:selected="${filter=='Errors'}">Errors</option>
+    </select>
+    <label class="threshold">Threshold <output id="thresholdOutput" th:text="${#numbers.formatDecimal(threshold,1,2)}">0.65</output>
+      <input id="threshold" type="range" min="10" max="95" th:value="${threshold*100}" oninput="Review.threshold(this.value)" onchange="Review.reload()">
+    </label>
+    <input id="search" type="search" th:value="${q}" placeholder="Search filename or path" oninput="Review.debounceReload()">
+    <span class="spacer"></span>
+    <button class="primary" onclick="Review.queue(false)">Start / Resume Scan</button>
+    <button onclick="Review.setStatus('KEPT')">Keep Selected</button>
+    <button class="warning" onclick="Review.setStatus('FLAGGED')">Flag Selected</button>
+    <button class="danger" onclick="Review.quarantine()">Quarantine Selected</button>
+    <button onclick="Review.restore()">Restore Selected</button>
+  </section>
+
+  <section class="photo-grid" id="photoGrid">
+    <article class="photo-card" th:each="card : ${cards}" th:data-id="${card.id}" onclick="Review.toggle(event,this)">
+      <div class="selection-mark">✓</div>
+      <div class="image-frame" th:classappend="${card.level == 'EXPLICIT' || card.level == 'REVIEW'} ? ' sensitive' : ''">
+        <img loading="lazy" th:src="@{/thumbs/{id}(id=${card.id})}" th:alt="${card.filename}">
+        <span class="level" th:classappend="${#strings.toLowerCase(card.level)}" th:text="${card.level}">UNKNOWN</span>
+        <span class="override" th:if="${card.overridden}">Manual</span>
+      </div>
+      <div class="photo-meta"><strong th:text="${card.filename}">photo.jpg</strong>
+        <span><b th:text="${card.score == null ? '—' : #numbers.formatDecimal(card.score,1,3)}">0.000</b> • <span th:text="${card.status}">PENDING</span></span>
+      </div>
+    </article>
+    <div class="empty" th:if="${#lists.isEmpty(cards)}">No photos match this review filter.</div>
+  </section>
+
+  <footer class="status-dock">
+    <div class="progress-track"><div id="queueProgress"></div></div>
+    <strong id="scanLabel" th:text="|${queue.pending} pending • ${queue.running} processing|">Idle</strong>
+    <div class="counts">
+      <span>Total <b th:text="${counts.total}">0</b></span><span>Flagged <b th:text="${counts.flagged}">0</b></span>
+      <span>Kept <b th:text="${counts.kept}">0</b></span><span>Quarantine <b th:text="${counts.quarantined}">0</b></span>
+      <span>Errors <b th:text="${counts.errors}">0</b></span>
+    </div>
+  </footer>
+</main>
+<div id="toast" role="status"></div>
+</body></html>

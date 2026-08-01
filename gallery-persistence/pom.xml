@@ -1,0 +1,4 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><parent><groupId>com.hawkins</groupId><artifactId>gallery-parent</artifactId><version>1.0.0-SNAPSHOT</version></parent><artifactId>gallery-persistence</artifactId><dependencies>
+<dependency><groupId>com.hawkins</groupId><artifactId>gallery-domain</artifactId></dependency>
+<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
+</dependencies></project>

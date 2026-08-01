@@ -1,0 +1,4 @@
+<main th:fragment="workspace" id="gallery-main" class="workspace" th:attr="data-folder-id=${folder.id}">
+  <div th:replace="~{fragments/toolbar :: toolbar}"></div>
+  <section id="asset-grid" th:replace="~{fragments/asset-grid :: grid}"></section>
+</main>

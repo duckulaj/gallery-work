@@ -1,0 +1,81 @@
+spring:
+  datasource:
+    url: ${GALLERY_DB_URL:jdbc:postgresql://localhost:5432/gallery_ai}
+    username: ${GALLERY_DB_USERNAME:gallery_user}
+    password: ${GALLERY_DB_PASSWORD:ja9juja9ju}
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    validate-on-migrate: false
+  thymeleaf:
+    cache: false
+  cache:
+    type: caffeine
+    cache-names: query-expansions,embeddings
+    caffeine:
+      spec: maximumSize=1000,expireAfterAccess=2h
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 500MB
+  ai:
+    retry:
+      max-attempts: 1
+    model:
+      chat: ollama
+      embedding: ollama
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        model: gemma3:4b
+        temperature: 0.2
+      embedding:
+        model: mxbai-embed-large
+app:
+  storage-root: ~/Gallery-App/data/gallery
+  thumbnail-size: 420
+  semantic-candidate-limit: 5000
+  ai:
+    background:
+      enabled: true
+      batch-size: 4
+      fixed-delay-ms: 5000
+      embedding-threads: 2
+      connection-pool-size: 4
+    vision:
+      enabled: true
+      model: minicpm-v:8b
+      temperature: 0.0
+      num-predict: 768
+      resize-size: 896
+      num-ctx: 4096
+      top-k: 40
+      top-p: 0.9
+      repeat-penalty: 1.1
+      num-batch: 512
+      keep-alive: 10m
+    face-recognition:
+      enabled: true
+      service-url: ${FACE_SERVICE_URL:http://localhost:8082}
+      threshold: 0.40
+      face-crops-dir: ~/Gallery-App/data/gallery/face-crops
+    nsfw:
+      enabled: true
+      fixed-delay-ms: 1200
+      service-url: ${NSFW_SERVICE_URL:http://localhost:8082}
+      review-threshold: 0.20
+      explicit-threshold: 0.55
+      quarantine-dir: ~/Gallery-App/data/gallery-quarantine
+  review:
+    quarantine-root: ~/Gallery-App/data/gallery/quarantine
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    tags:
+      application: gallery-app

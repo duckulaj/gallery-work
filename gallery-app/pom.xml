@@ -1,0 +1,89 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.hawkins</groupId>
+        <artifactId>gallery-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gallery-app</artifactId>
+    <name>Gallery App - Executable</name>
+    <description>Single executable assembly containing every Gallery Java module.</description>
+
+    <dependencies>
+        <!-- Explicit feature-module assembly. These are intentionally direct so the
+             executable POM is the authoritative list of installed application modules. -->
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-persistence</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-ai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-review</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hawkins</groupId>
+            <artifactId>gallery-web</artifactId>
+        </dependency>
+
+        <!-- Runtime/platform dependencies owned by the executable module. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.hawkins.gallery.GalleryApplication</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
