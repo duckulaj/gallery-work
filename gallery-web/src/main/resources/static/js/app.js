@@ -83,4 +83,10 @@
     panel.innerHTML = '';
     panel.classList.add('ai-panel--hidden');
   };
+
+  if (document.body.dataset.initialPanel === 'imports') {
+    window.fpToggle();
+  } else if (document.body.dataset.initialPanel === 'processing') {
+    window.aiPanelOpen();
+  }
 })();

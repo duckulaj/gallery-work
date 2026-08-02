@@ -8,7 +8,6 @@ import java.time.Instant;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,15 +31,9 @@ public class NsfwController {
     private String quarantineDir;
 
     @GetMapping("/review/sensitive")
-    public String review(@RequestParam(defaultValue = "UNREVIEWED") String status,
-                         @RequestParam(required = false) Double threshold,
-                         Model model) {
+    public String review(@RequestParam(required = false) Double threshold) {
         double score = threshold == null ? defaultThreshold : threshold;
-        model.addAttribute("assets", assets.findNsfwReview(score, status));
-        model.addAttribute("metas", metadata.findAll().stream().collect(java.util.stream.Collectors.toMap(x -> x.getAssetId(), x -> x)));
-        model.addAttribute("threshold", score);
-        model.addAttribute("status", status);
-        return "nsfw-review";
+        return "redirect:/review?threshold=" + score;
     }
 
     @PostMapping("/review/sensitive/{id}/status")

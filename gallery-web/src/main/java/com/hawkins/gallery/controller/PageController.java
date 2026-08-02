@@ -33,6 +33,18 @@ public class PageController {
         return "index";
     }
 
+    @GetMapping("/imports")
+    public String imports(Model model) {
+        model.addAttribute("initialPanel", "imports");
+        return index(model);
+    }
+
+    @GetMapping("/processing")
+    public String processing(Model model) {
+        model.addAttribute("initialPanel", "processing");
+        return index(model);
+    }
+
     @GetMapping("/folders/{id}")
     public String folder(@PathVariable String id,
             @RequestHeader(value = "HX-Request", required = false) String hxRequest,

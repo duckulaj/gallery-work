@@ -6,7 +6,7 @@
     <th:block th:replace="~{fragments/sidebar :: albumNodes(nodes=${albumTree})}"></th:block>
   </nav>
   <div class="file-sidebar-footer">
-    <a class="faces-nav-link" th:href="@{/review}">
+    <a class="faces-nav-link" th:href="@{/review}" hx-boost="false">
       <i class="bi bi-shield-exclamation"></i><span>Sensitive review</span>
     </a>
     <!-- Unidentified faces link -->

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/css/app.css">
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
-<body hx-boost="true">
+<body hx-boost="true" th:attr="data-initial-panel=${initialPanel}">
   <div class="shell">
     <aside th:replace="~{fragments/sidebar :: sidebar}"></aside>
     <main id="gallery-main" th:replace="~{fragments/workspace :: workspace}"></main>
