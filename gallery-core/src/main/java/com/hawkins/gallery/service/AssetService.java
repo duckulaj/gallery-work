@@ -39,6 +39,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@SuppressWarnings("null")
 public class AssetService {
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff");

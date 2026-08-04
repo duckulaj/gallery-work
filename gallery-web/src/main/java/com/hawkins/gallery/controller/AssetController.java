@@ -3,6 +3,7 @@ package com.hawkins.gallery.controller;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -136,6 +137,11 @@ public class AssetController {
     @PostMapping("/faces/queue-recognition")
     public String queueFaceRecognition(@RequestParam String folderId, @RequestParam(required = false) String q, Model model) {
         var result = assets.reindexAi(folderId);
+        List<String> assetIds = new ArrayList<>();
+        for (var asset : assetRepo.findByFolderIdOrderByCreatedAtDesc(folderId)) {
+            assetIds.add(asset.getId());
+        }
+        aiEnrichment.trackKnownFaceApplication(assetIds);
         aiEnrichment.activateQueue();
         model.addAttribute("notice", "Known faces updated. " + result.message());
         model.addAttribute("assets", search.search(folderId, q));

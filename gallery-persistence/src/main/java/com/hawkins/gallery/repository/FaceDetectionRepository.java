@@ -12,6 +12,13 @@ import com.hawkins.gallery.domain.FaceDetection;
 
 public interface FaceDetectionRepository extends JpaRepository<FaceDetection, String> {
 
+        interface KnownFaceMatch {
+                String getExampleId();
+                String getPersonId();
+                String getDisplayName();
+                Double getSimilarity();
+        }
+
     List<FaceDetection> findByAssetIdOrderByCreatedAtAsc(String assetId);
 
     void deleteByAssetId(String assetId);
@@ -30,7 +37,8 @@ public interface FaceDetectionRepository extends JpaRepository<FaceDetection, St
      * Only considers examples that have a stored embedding.
      */
     @Query(value = """
-            SELECT kfe.id, kfe.person_id, p.display_name,
+             SELECT kfe.id AS "exampleId", kfe.person_id AS "personId",
+                     p.display_name AS "displayName",
                    1 - (kfe.embedding <=> CAST(:lit AS vector)) AS similarity
             FROM known_face_examples kfe
             JOIN known_persons p ON p.id = kfe.person_id
@@ -38,7 +46,7 @@ public interface FaceDetectionRepository extends JpaRepository<FaceDetection, St
             ORDER BY kfe.embedding <=> CAST(:lit AS vector)
             LIMIT 1
             """, nativeQuery = true)
-    Optional<Object[]> findNearestKnownFace(@Param("lit") String vectorLiteral);
+    Optional<KnownFaceMatch> findNearestKnownFace(@Param("lit") String vectorLiteral);
 
     /**
      * Copies the ArcFace embedding from a face_detection row into a known_face_example row.
@@ -55,6 +63,6 @@ public interface FaceDetectionRepository extends JpaRepository<FaceDetection, St
             )
             WHERE id = :exampleId
             """, nativeQuery = true)
-    void copyEmbeddingToExample(@Param("detectionId") String detectionId,
-                                @Param("exampleId") String exampleId);
+        int copyEmbeddingToExample(@Param("detectionId") String detectionId,
+                                                           @Param("exampleId") String exampleId);
 }

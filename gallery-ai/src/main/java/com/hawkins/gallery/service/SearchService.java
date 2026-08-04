@@ -21,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@SuppressWarnings("null")
 public class SearchService {
     private static final float TEXT_WEIGHT = 0.45f;
     private static final float SEMANTIC_WEIGHT = 0.55f;

@@ -18,6 +18,7 @@ import com.hawkins.gallery.domain.AssetMetadata;
 import com.hawkins.gallery.domain.KnownFaceExample;
 import com.hawkins.gallery.domain.KnownPerson;
 import com.hawkins.gallery.repository.AssetMetadataRepository;
+import com.hawkins.gallery.repository.FaceDetectionRepository;
 import com.hawkins.gallery.repository.KnownFaceExampleRepository;
 import com.hawkins.gallery.repository.KnownPersonRepository;
 
@@ -28,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 public class KnownFaceService {
     private final KnownPersonRepository people;
     private final KnownFaceExampleRepository examples;
+    private final FaceDetectionRepository detections;
     private final AssetMetadataRepository metas;
     private final ObjectMapper mapper;
 
@@ -57,12 +59,27 @@ public class KnownFaceService {
         KnownPerson person = people.findByDisplayNameIgnoreCase(cleanName)
                 .orElseGet(() -> people.save(new KnownPerson(cleanName)));
 
-        if (!examples.existsByPersonIdAndSourceAssetId(person.getId(), assetId)) {
-            KnownFaceExample example = new KnownFaceExample();
-            example.setPerson(person);
-            example.setSourceAssetId(assetId);
-            example.setFaceDescription(clean(faceDescription));
-            examples.save(example);
+        var assetFaces = detections.findByAssetIdOrderByCreatedAtAsc(assetId);
+        if (assetFaces.size() != 1) {
+            throw new IllegalArgumentException(
+                    "Select Identify on the intended face when an image contains zero or multiple detected faces");
+        }
+        var detection = assetFaces.getFirst();
+        if (detection.getEmbeddingJson() == null || detection.getEmbeddingJson().isBlank()) {
+            throw new IllegalStateException("The detected face has no recognition embedding");
+        }
+
+        KnownFaceExample example = examples.findByPersonIdAndSourceAssetId(person.getId(), assetId)
+                .orElseGet(() -> {
+                    KnownFaceExample created = new KnownFaceExample();
+                    created.setPerson(person);
+                    created.setSourceAssetId(assetId);
+                    return created;
+                });
+        example.setFaceDescription(clean(faceDescription));
+        examples.saveAndFlush(example);
+        if (detections.copyEmbeddingToExample(detection.getId(), example.getId()) != 1) {
+            throw new IllegalStateException("Could not store the detected face embedding");
         }
 
         AssetMetadata meta = metas.findById(assetId).orElse(null);

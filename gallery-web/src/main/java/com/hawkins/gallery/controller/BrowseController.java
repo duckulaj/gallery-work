@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @Controller
+@SuppressWarnings("null")
 public class BrowseController {
 
     /** Restrict browsing to the current user's home directory to prevent exposing system paths. */

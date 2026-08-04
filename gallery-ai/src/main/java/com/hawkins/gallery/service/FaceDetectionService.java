@@ -51,7 +51,7 @@ import lombok.extern.slf4j.Slf4j;
 public class FaceDetectionService {
 
     /** Summary returned to the enrichment pipeline so it can update asset_metadata. */
-    public record FaceDetectionSummary(int totalFaces, List<String> recognisedNames) {}
+    public record FaceDetectionSummary(int totalFaces, int matchedFaces, List<String> recognisedNames) {}
 
     private final DeepFaceClient deepFaceClient;
     private final FaceDetectionRepository detections;
@@ -75,7 +75,7 @@ public class FaceDetectionService {
     @Transactional
     public FaceDetectionSummary detectAndRecognise(String assetId, Path imagePath) {
         if (!props.ai().faceRecognition().enabled()) {
-            return new FaceDetectionSummary(0, List.of());
+            return new FaceDetectionSummary(0, 0, List.of());
         }
 
         // Remove stale detections from a prior enrichment run.
@@ -83,7 +83,7 @@ public class FaceDetectionService {
 
         List<DeepFaceClient.DetectedFace> faces = deepFaceClient.detect(imagePath);
         if (faces.isEmpty()) {
-            return new FaceDetectionSummary(0, List.of());
+            return new FaceDetectionSummary(0, 0, List.of());
         }
 
         List<String> recognisedNames = new ArrayList<>();
@@ -102,14 +102,17 @@ public class FaceDetectionService {
 
             var nearest = detections.findNearestKnownFace(vectorLit);
             if (nearest.isPresent()) {
-                Object[] row = nearest.get();
-                if (row != null && row.length >= 4 && row[3] != null) {
-                    double similarity = ((Number) row[3]).doubleValue();
+                var match = nearest.get();
+                if (match.getSimilarity() != null) {
+                    double similarity = match.getSimilarity();
                     if (similarity >= threshold) {
-                        personId   = (String) row[1];
-                        personName = (String) row[2];
+                        personId   = match.getPersonId();
+                        personName = match.getDisplayName();
                         confidence = (float) similarity;
                         recognisedNames.add(personName);
+                    } else {
+                        log.debug("Nearest known face for asset {} was '{}' at {} (threshold {})",
+                                assetId, match.getDisplayName(), similarity, threshold);
                     }
                 }
             }
@@ -127,7 +130,8 @@ public class FaceDetectionService {
 
         log.info("Face detection for asset {}: {} face(s), {} recognised",
                 assetId, faces.size(), recognisedNames.size());
-        return new FaceDetectionSummary(faces.size(), recognisedNames.stream().distinct().toList());
+        return new FaceDetectionSummary(
+            faces.size(), recognisedNames.size(), recognisedNames.stream().distinct().toList());
     }
 
     // ── Enrollment ────────────────────────────────────────────────────────────
@@ -149,11 +153,14 @@ public class FaceDetectionService {
         KnownFaceExample example = new KnownFaceExample();
         example.setPerson(person);
         example.setSourceAssetId(fd.getAssetId());
-        examples.save(example);
+        examples.saveAndFlush(example);
 
         // Copy the ArcFace embedding from face_detections → known_face_examples so
         // this person is immediately searchable via the pgvector HNSW index.
-        detections.copyEmbeddingToExample(fd.getId(), example.getId());
+        int copied = detections.copyEmbeddingToExample(fd.getId(), example.getId());
+        if (copied != 1) {
+            throw new IllegalStateException("Could not store the face embedding for detection " + detectionId);
+        }
 
         fd.setPersonId(person.getId());
         fd.setPersonName(person.getDisplayName());

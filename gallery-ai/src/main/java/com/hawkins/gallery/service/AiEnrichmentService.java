@@ -2,11 +2,14 @@ package com.hawkins.gallery.service;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,6 +49,9 @@ public class AiEnrichmentService {
     private final ExecutorService enrichmentExecutor;
     private final ObjectMapper mapper;
     private final java.util.concurrent.ConcurrentMap<String, CompletableFuture<Void>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
+    private final AtomicBoolean knownFaceApplicationActive = new AtomicBoolean();
+    private final AtomicInteger knownFaceMatches = new AtomicInteger();
+    private final java.util.Set<String> knownFaceApplicationAssets = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private TransactionTemplate txTemplate;
 
     @Value("${app.ai.background.enabled:true}")
@@ -70,6 +76,14 @@ public class AiEnrichmentService {
     /** Called by the halt endpoint and the night scheduler's end window. */
     public void deactivateQueue() {
         queueActive = false;
+    }
+
+    public void trackKnownFaceApplication(Collection<String> assetIds) {
+        knownFaceMatches.set(0);
+        knownFaceApplicationAssets.clear();
+        knownFaceApplicationAssets.addAll(assetIds);
+        knownFaceApplicationActive.set(true);
+        log.info("Apply known faces started for {} asset(s)", assetIds.size());
     }
 
     @PostConstruct
@@ -97,6 +111,10 @@ public class AiEnrichmentService {
 
         var ids = metas.findNextAiQueueBatch(Math.max(1, batchSize));
         if (ids.isEmpty()) {
+            if (knownFaceApplicationActive.compareAndSet(true, false)) {
+                log.info("Apply known faces complete: {} face(s) matched", knownFaceMatches.get());
+                knownFaceApplicationAssets.clear();
+            }
             return;
         }
 
@@ -119,6 +137,16 @@ public class AiEnrichmentService {
                 .map(f -> f.getNow(null))
                 .filter(Objects::nonNull)
                 .toList();
+
+        if (knownFaceApplicationActive.get()) {
+            int matchedFaces = 0;
+            for (EnrichmentIntermediate intermediate : intermediates) {
+                if (intermediate.applyKnownFaces() && intermediate.faceResult() != null) {
+                    matchedFaces += intermediate.faceResult().matchedFaces();
+                }
+            }
+            knownFaceMatches.addAndGet(matchedFaces);
+        }
 
         if (intermediates.isEmpty()) {
             ids.forEach(inFlight::remove);
@@ -189,6 +217,7 @@ public class AiEnrichmentService {
         if (!claim(assetId)) {
             return null;
         }
+        boolean applyKnownFaces = knownFaceApplicationAssets.remove(assetId);
         try {
             AssetSnapshot snapshot = loadSnapshot(assetId);
             Path original = Path.of(snapshot.storagePath()).toAbsolutePath().normalize();
@@ -209,11 +238,15 @@ public class AiEnrichmentService {
                     faceDetection.detectAndRecognise(assetId, original);
             sw.stop();
 
-            sw.start("NSFW detection");
-            NsfwClient.Result nsfwResult = nsfw.detect(original);
-            sw.stop();
+            NsfwClient.Result nsfwResult = null;
+            if (!applyKnownFaces) {
+                sw.start("NSFW detection");
+                nsfwResult = nsfw.detect(original);
+                sw.stop();
+            }
 
-            return new EnrichmentIntermediate(assetId, snapshot, original, exif, aiAnalysis, faceResult, nsfwResult, sw);
+                return new EnrichmentIntermediate(
+                    assetId, snapshot, original, exif, aiAnalysis, faceResult, nsfwResult, applyKnownFaces, sw);
         } catch (Exception ex) {
             markFailed(assetId, ex);
             return null;
@@ -264,11 +297,13 @@ public class AiEnrichmentService {
                 m.setFaceDescriptions(ir.aiAnalysis().faceDescriptions());
                 m.setSceneType(ir.aiAnalysis().sceneType());
                 m.setSceneLabels(ir.aiAnalysis().sceneLabels());
-                m.setNsfwScore(ir.nsfwResult().score());
-                m.setNsfwLevel(ir.nsfwResult().level());
-                m.setNsfwLabels(toJson(ir.nsfwResult().labels()));
-                if (m.getNsfwReviewStatus() == null || m.getNsfwReviewStatus().isBlank()) {
-                    m.setNsfwReviewStatus("UNREVIEWED");
+                if (ir.nsfwResult() != null) {
+                    m.setNsfwScore(ir.nsfwResult().score());
+                    m.setNsfwLevel(ir.nsfwResult().level());
+                    m.setNsfwLabels(toJson(ir.nsfwResult().labels()));
+                    if (m.getNsfwReviewStatus() == null || m.getNsfwReviewStatus().isBlank()) {
+                        m.setNsfwReviewStatus("UNREVIEWED");
+                    }
                 }
                 m.setExifJson(toJson(ir.exif()));
                 m.setAiModel(ir.aiAnalysis().model());
@@ -322,6 +357,7 @@ public class AiEnrichmentService {
             AiTaggingService.AiImageAnalysis aiAnalysis,
             FaceDetectionService.FaceDetectionSummary faceResult,
             NsfwClient.Result nsfwResult,
+            boolean applyKnownFaces,
             org.springframework.util.StopWatch sw) {}
 
     private boolean claim(String assetId) {

@@ -13,6 +13,7 @@ import com.hawkins.gallery.review.domain.*;
 import com.hawkins.gallery.review.repository.AssetReviewRepository;
 
 @Service
+@SuppressWarnings("null")
 public class ReviewService {
     private final AssetRepository assets;
     private final AssetReviewRepository reviews;
