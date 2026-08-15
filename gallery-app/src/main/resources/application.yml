@@ -47,7 +47,7 @@ app:
       connection-pool-size: 4
     vision:
       enabled: true
-      model: minicpm-v:8b
+      model: minicpm-v4.6
       temperature: 0.0
       num-predict: 768
       resize-size: 896

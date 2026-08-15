@@ -36,7 +36,7 @@ Pull the local AI models once:
 ```bash
 ollama pull gemma3:4b
 ollama pull mxbai-embed-large
-ollama pull minicpm-v:8b
+ollama pull minicpm-v4.6
 ```
 
 Ensure Ollama is running:
