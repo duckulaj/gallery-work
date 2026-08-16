@@ -43,8 +43,8 @@ public class SearchService {
         String expandedQuery = queryExpansion.expand(originalQuery);
         Map<String, ScoredAsset> ranked = new LinkedHashMap<>();
 
-        addTextMatches(folderId, expandedQuery, ranked);
-        addSemanticMatches(folderId, expandedQuery, ranked);
+        addTextMatches(expandedQuery, ranked);
+        addSemanticMatches(expandedQuery, ranked);
 
         return ranked.values().stream()
                 .sorted(Comparator.comparing(ScoredAsset::finalScore).reversed()
@@ -54,8 +54,8 @@ public class SearchService {
                 .toList();
     }
 
-    private void addTextMatches(String folderId, String expandedQuery, Map<String, ScoredAsset> ranked) {
-        List<Asset> textMatches = assets.fullTextSearch(folderId, expandedQuery);
+    private void addTextMatches(String expandedQuery, Map<String, ScoredAsset> ranked) {
+        List<Asset> textMatches = assets.fullTextSearch(expandedQuery);
         for (int i = 0; i < textMatches.size(); i++) {
             Asset asset = textMatches.get(i);
             float positionScore = 1.0f - Math.min(0.40f, i / 500.0f);
@@ -67,21 +67,20 @@ public class SearchService {
         }
     }
 
-    private void addSemanticMatches(String folderId, String expandedQuery, Map<String, ScoredAsset> ranked) {
+    private void addSemanticMatches(String expandedQuery, Map<String, ScoredAsset> ranked) {
         try {
             float[] queryVector = embed.embed(expandedQuery);
-            addPgVectorMatches(folderId, queryVector, ranked);
+            addPgVectorMatches(queryVector, ranked);
         } catch (Exception ex) {
             // Text search must remain useful even when Ollama/embedding generation is offline.
             log.debug("Semantic search skipped: {}", ex.getMessage());
         }
     }
 
-    private void addPgVectorMatches(String folderId, float[] queryVector, Map<String, ScoredAsset> ranked) {
+    private void addPgVectorMatches(float[] queryVector, Map<String, ScoredAsset> ranked) {
         int limit = Math.max(DEFAULT_RESULT_LIMIT, props.semanticCandidateLimit());
         try {
-            List<AssetEmbeddingRepository.SemanticAssetScoreRow> rows = embeddings.findNearestByFolder(
-                    folderId,
+            List<AssetEmbeddingRepository.SemanticAssetScoreRow> rows = embeddings.findNearest(
                     embed.toPgVectorLiteral(queryVector),
                     limit);
 
@@ -105,12 +104,12 @@ public class SearchService {
         } catch (Exception pgVectorEx) {
             // Compatibility path while moving from MySQL/JSON vectors to PostgreSQL/pgvector.
             log.debug("pgvector semantic search unavailable; using JSON fallback: {}", pgVectorEx.getMessage());
-            addLegacyJsonSemanticMatches(folderId, queryVector, ranked);
+            addLegacyJsonSemanticMatches(queryVector, ranked);
         }
     }
 
-    private void addLegacyJsonSemanticMatches(String folderId, float[] queryVector, Map<String, ScoredAsset> ranked) {
-        embeddings.findByFolder(folderId).stream()
+    private void addLegacyJsonSemanticMatches(float[] queryVector, Map<String, ScoredAsset> ranked) {
+        embeddings.findAllWithAsset().stream()
                 .limit(props.semanticCandidateLimit())
                 .map(e -> new SemanticHit(e.getAsset(), embed.cosine(queryVector, embed.fromJson(e.getEmbeddingJson()))))
                 .filter(h -> h.score > MIN_SEMANTIC_SCORE)

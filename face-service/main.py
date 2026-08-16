@@ -10,15 +10,17 @@ POST /detect          – detect faces in an uploaded image, return embeddings +
 import base64
 import os
 import tempfile
+import time
 from contextlib import asynccontextmanager
 
 import cv2
 import numpy as np
 import uvicorn
-from deepface import DeepFace
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from nudenet import NudeDetector
+
+DeepFace = None
 
 # ── Model config ─────────────────────────────────────────────────────────────
 MODEL_NAME       = os.getenv("DEEPFACE_MODEL",    "ArcFace")
@@ -44,6 +46,11 @@ EXPLICIT_CLASSES = {
 # ── Pre-warm model on startup ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global DeepFace
+    get_nsfw_detector()
+    from deepface import DeepFace as DeepFaceClass
+    DeepFace = DeepFaceClass
+
     print(f"[face-service] Pre-warming {MODEL_NAME} with {DETECTOR_BACKEND} …", flush=True)
     try:
         dummy = np.zeros((112, 112, 3), dtype=np.uint8)
@@ -100,16 +107,27 @@ def get_nsfw_detector() -> NudeDetector:
 
 @app.post("/nsfw/detect")
 async def detect_nsfw(file: UploadFile = File(...)):
+    request_started = time.perf_counter()
     contents = await file.read()
+    upload_read_ms = (time.perf_counter() - request_started) * 1000
     suffix = os.path.splitext(file.filename or "image.jpg")[1] or ".jpg"
 
+    tempfile_started = time.perf_counter()
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(contents)
         tmp_path = tmp.name
+    tempfile_write_ms = (time.perf_counter() - tempfile_started) * 1000
 
     try:
-        detections = get_nsfw_detector().detect(tmp_path)
+        model_started = time.perf_counter()
+        detector = get_nsfw_detector()
+        model_init_ms = (time.perf_counter() - model_started) * 1000
 
+        inference_started = time.perf_counter()
+        detections = detector.detect(tmp_path)
+        inference_ms = (time.perf_counter() - inference_started) * 1000
+
+        scoring_started = time.perf_counter()
         explicit_detections = []
         for detection in detections:
             name = str(detection.get("class", ""))
@@ -131,11 +149,24 @@ async def detect_nsfw(file: UploadFile = File(...)):
         else:
             level = "SAFE"
 
+        scoring_ms = (time.perf_counter() - scoring_started) * 1000
+        total_ms = (time.perf_counter() - request_started) * 1000
+        profile = {
+            "uploadReadMs": round(upload_read_ms, 2),
+            "tempfileWriteMs": round(tempfile_write_ms, 2),
+            "modelInitMs": round(model_init_ms, 2),
+            "inferenceMs": round(inference_ms, 2),
+            "scoringMs": round(scoring_ms, 2),
+            "totalMs": round(total_ms, 2),
+        }
+        print(f"[face-service] NSFW profile {file.filename}: {profile}", flush=True)
+
         return JSONResponse(content={
             "score": score,
             "level": level,
             "labels": explicit_detections,
             "scoringVersion": NSFW_SCORING_VERSION,
+            "profile": profile,
         })
     except Exception as exc:
         return JSONResponse(

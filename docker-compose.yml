@@ -22,6 +22,7 @@ services:
       context: ./face-service
     container_name: gallery-face-service
     restart: unless-stopped
+    gpus: all
     ports:
       - "8082:8082"
     environment:

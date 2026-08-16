@@ -23,9 +23,16 @@ public class NsfwClient {
     public record Label(String name, double score) {
     }
 
-    public record Result(double score, String level, List<Label> labels) {
+    public record Profile(double uploadReadMs, double tempfileWriteMs, double modelInitMs,
+            double inferenceMs, double scoringMs, double totalMs) {
+        public static Profile empty() {
+            return new Profile(0d, 0d, 0d, 0d, 0d, 0d);
+        }
+    }
+
+    public record Result(double score, String level, List<Label> labels, Profile profile) {
         public static Result unknown() {
-            return new Result(0d, "UNKNOWN", List.of());
+            return new Result(0d, "UNKNOWN", List.of(), Profile.empty());
         }
     }
 
@@ -54,16 +61,32 @@ public class NsfwClient {
             List<Map<String, Object>> raw = (List<Map<String, Object>>) root.getOrDefault("labels", List.of());
             List<Label> labels = raw.stream().map(x -> new Label(
                     String.valueOf(x.get("name")), ((Number) x.getOrDefault("score", 0d)).doubleValue())).toList();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> rawProfile = (Map<String, Object>) root.getOrDefault("profile", Map.of());
+                Profile profile = new Profile(
+                    number(rawProfile, "uploadReadMs"),
+                    number(rawProfile, "tempfileWriteMs"),
+                    number(rawProfile, "modelInitMs"),
+                    number(rawProfile, "inferenceMs"),
+                    number(rawProfile, "scoringMs"),
+                    number(rawProfile, "totalMs"));
 
             sw.stop();
-            log.info("{}", sw.shortSummary());
+                log.info("{} | server upload={}ms tempfile={}ms model-init={}ms inference={}ms scoring={}ms total={}ms",
+                    imagePath.getFileName(), profile.uploadReadMs(), profile.tempfileWriteMs(),
+                    profile.modelInitMs(), profile.inferenceMs(), profile.scoringMs(), profile.totalMs());
 
-            return new Result(score, level, labels);
+                return new Result(score, level, labels, profile);
         } catch (Exception ex) {
             log.warn("NSFW detection skipped for {}: {}", imagePath.getFileName(), ex.getMessage());
             sw.stop();
             log.info("{}", sw.shortSummary());
             return Result.unknown();
         }
+    }
+
+    private double number(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        return value instanceof Number number ? number.doubleValue() : 0d;
     }
 }

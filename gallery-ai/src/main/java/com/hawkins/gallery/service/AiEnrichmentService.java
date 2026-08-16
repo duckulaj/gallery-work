@@ -49,6 +49,7 @@ public class AiEnrichmentService {
     private final ExecutorService enrichmentExecutor;
     private final ObjectMapper mapper;
     private final java.util.concurrent.ConcurrentMap<String, CompletableFuture<Void>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentMap<String, ActiveProcessState> activeProcesses = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean knownFaceApplicationActive = new AtomicBoolean();
     private final AtomicInteger knownFaceMatches = new AtomicInteger();
     private final java.util.Set<String> knownFaceApplicationAssets = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -159,13 +160,17 @@ public class AiEnrichmentService {
         List<String> embeddingTexts = intermediates.stream()
                 .map(ir -> buildEmbeddingText(ir.snapshot(), ir.aiAnalysis(), ir.original()))
                 .toList();
+        intermediates.forEach(ir -> updateActiveStage(ir.assetId(), "Embedding"));
         List<float[]> vectors;
         long embedStart = System.currentTimeMillis();
         try {
             vectors = embed.embedBatch(embeddingTexts);
         } catch (Exception ex) {
             log.error("Batch embedding failed for {} asset(s): {}", intermediates.size(), ex.getMessage());
-            intermediates.forEach(ir -> markFailed(ir.assetId(), ex));
+            intermediates.forEach(ir -> {
+                markFailed(ir.assetId(), ex);
+                activeProcesses.remove(ir.assetId());
+            });
             ids.forEach(inFlight::remove);
             return;
         }
@@ -177,6 +182,7 @@ public class AiEnrichmentService {
         for (int i = 0; i < intermediates.size(); i++) {
             final EnrichmentIntermediate ir = intermediates.get(i);
             final float[] vector = vectors.get(i);
+            updateActiveStage(ir.assetId(), "Persistence");
             CompletableFuture<Void> f = CompletableFuture.runAsync(
                     () -> persistAsset(ir, vector, embedMsPerAsset), enrichmentExecutor);
             f.whenComplete((r, t) -> inFlight.remove(ir.assetId()));
@@ -212,6 +218,18 @@ public class AiEnrichmentService {
         return new AiQueueStats(pending, processing, complete, failed, cancelled);
     }
 
+    public List<ActiveProcess> slowestActiveProcesses() {
+        long now = System.currentTimeMillis();
+        return activeProcesses.entrySet().stream()
+                .map(entry -> {
+                    ActiveProcessState state = entry.getValue();
+                    return new ActiveProcess(entry.getKey(), state.filename(), state.stage(),
+                            now - state.startedAtMs(), now - state.stageStartedAtMs());
+                })
+                .sorted((left, right) -> Long.compare(right.elapsedMs(), left.elapsedMs()))
+                .toList();
+    }
+
     /** Phase 1: claim the asset and run EXIF + vision + face matching. Returns null if skipped/failed. */
     private EnrichmentIntermediate claimAndAnalyse(String assetId) {
         if (!claim(assetId)) {
@@ -221,6 +239,7 @@ public class AiEnrichmentService {
         try {
             AssetSnapshot snapshot = loadSnapshot(assetId);
             Path original = Path.of(snapshot.storagePath()).toAbsolutePath().normalize();
+            startActiveProcess(assetId, snapshot.filename(), "EXIF extraction");
 
             org.springframework.util.StopWatch sw =
                     new org.springframework.util.StopWatch("Enrichment for " + snapshot.filename());
@@ -229,10 +248,12 @@ public class AiEnrichmentService {
             Map<String, String> exif = images.exif(original);
             sw.stop();
 
+            updateActiveStage(assetId, "AI tagging/vision");
             sw.start("AI tagging/vision");
             AiTaggingService.AiImageAnalysis aiAnalysis = ai.analyzeImage(original, snapshot.filename(), exif);
             sw.stop();
 
+            updateActiveStage(assetId, "Face detection");
             sw.start("Face detection");
             FaceDetectionService.FaceDetectionSummary faceResult =
                     faceDetection.detectAndRecognise(assetId, original);
@@ -240,6 +261,7 @@ public class AiEnrichmentService {
 
             NsfwClient.Result nsfwResult = null;
             if (!applyKnownFaces) {
+                updateActiveStage(assetId, "NSFW detection");
                 sw.start("NSFW detection");
                 nsfwResult = nsfw.detect(original);
                 sw.stop();
@@ -249,6 +271,7 @@ public class AiEnrichmentService {
                     assetId, snapshot, original, exif, aiAnalysis, faceResult, nsfwResult, applyKnownFaces, sw);
         } catch (Exception ex) {
             markFailed(assetId, ex);
+            activeProcesses.remove(assetId);
             return null;
         }
     }
@@ -346,7 +369,20 @@ public class AiEnrichmentService {
             });
         } catch (Exception ex) {
             markFailed(ir.assetId(), ex);
+        } finally {
+            activeProcesses.remove(ir.assetId());
         }
+    }
+
+    private void startActiveProcess(String assetId, String filename, String stage) {
+        long now = System.currentTimeMillis();
+        activeProcesses.put(assetId, new ActiveProcessState(filename, stage, now, now));
+    }
+
+    private void updateActiveStage(String assetId, String stage) {
+        long now = System.currentTimeMillis();
+        activeProcesses.computeIfPresent(assetId, (id, current) ->
+                new ActiveProcessState(current.filename(), stage, current.startedAtMs(), now));
     }
 
     private record EnrichmentIntermediate(
@@ -446,6 +482,12 @@ public class AiEnrichmentService {
     }
 
     private record AssetSnapshot(String id, String filename, String storagePath) {
+    }
+
+    private record ActiveProcessState(String filename, String stage, long startedAtMs, long stageStartedAtMs) {
+    }
+
+    public record ActiveProcess(String assetId, String filename, String stage, long elapsedMs, long stageElapsedMs) {
     }
 
     public record AiQueueStats(long pending, long processing, long complete, long failed, long cancelled) {

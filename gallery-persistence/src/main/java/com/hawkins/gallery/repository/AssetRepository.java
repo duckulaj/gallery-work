@@ -31,7 +31,7 @@ public interface AssetRepository extends JpaRepository<Asset, String> {
 
   List<Asset> findByFolderIdOrderByCreatedAtDesc(String folderId);
 
-  List<Asset> fullTextSearch(String folderId, String q);
+  List<Asset> fullTextSearch(String q);
 
   boolean existsByFolderIdAndChecksum(String folderId, String checksum);
 

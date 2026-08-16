@@ -88,11 +88,15 @@ public class ImageService {
             md.getDirectories().forEach(d -> {
                 for (Tag t : d.getTags())
                     if (map.size() < 80)
-                        map.put(d.getName() + "." + t.getTagName(), t.getDescription());
+                        map.put(d.getName() + "." + t.getTagName(), sanitiseExifText(t.getDescription()));
             });
         } catch (Exception e) {
             log.debug("Could not read EXIF for {}: {}", p.getFileName(), e.getMessage());
         }
         return map;
+    }
+
+    static String sanitiseExifText(String value) {
+        return value == null ? null : value.replace("\u0000", "");
     }
 }

@@ -46,7 +46,7 @@ public record AppProperties(String storageRoot, int thumbnailSize, int semanticC
                           int numCtx, int topK, double topP, double repeatPenalty,
                           int numBatch, String keepAlive) {
         static Vision defaults() {
-            return new Vision(false, "qwen2.5vl:7b",
+            return new Vision(false, "qwen3.8",
                     0.0d, 768, 672, 4096, 40, 0.9d, 1.1d, 512, "10m");
         }
     }

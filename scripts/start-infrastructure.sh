@@ -2,22 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "Starting PostgreSQL/pgvector and face-service..."
-docker compose up -d --build postgres face-service
+echo "Starting face-service..."
+docker compose up -d --build face-service
 
-echo "Waiting for PostgreSQL..."
-for attempt in {1..60}; do
-  status=$(docker inspect --format='{{.State.Health.Status}}' gallery-postgres 2>/dev/null || true)
-  if [[ "$status" == "healthy" ]]; then
-    echo "PostgreSQL is ready."
-    break
-  fi
-  if [[ "$attempt" == "60" ]]; then
-    echo "PostgreSQL did not become healthy. Run: docker compose logs postgres" >&2
-    exit 1
-  fi
-  sleep 2
-done
 
 # The first DeepFace start can take longer while models are downloaded. Do not
 # block Java startup indefinitely; the app can start and the service becomes

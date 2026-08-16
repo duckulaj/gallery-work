@@ -12,8 +12,8 @@ import com.hawkins.gallery.domain.AssetEmbedding;
 
 public interface AssetEmbeddingRepository extends JpaRepository<AssetEmbedding, String> {
 
-    @Query("select e from AssetEmbedding e join fetch e.asset a where a.folder.id=:folderId")
-    List<AssetEmbedding> findByFolder(@Param("folderId") String folderId);
+    @Query("select e from AssetEmbedding e join fetch e.asset")
+    List<AssetEmbedding> findAllWithAsset();
 
     /**
      * PostgreSQL/pgvector nearest-neighbour search.
@@ -33,13 +33,11 @@ public interface AssetEmbeddingRepository extends JpaRepository<AssetEmbedding, 
                 greatest(0.0, 1.0 - (e.embedding <=> cast(:queryEmbedding as vector))) as semanticScore
             from asset_embeddings e
             join assets a on a.id = e.asset_id
-            where a.folder_id = :folderId
-              and e.embedding is not null
+            where e.embedding is not null
             order by e.embedding <=> cast(:queryEmbedding as vector)
             limit :limit
             """, nativeQuery = true)
-    List<SemanticAssetScoreRow> findNearestByFolder(
-            @Param("folderId") String folderId,
+    List<SemanticAssetScoreRow> findNearest(
             @Param("queryEmbedding") String queryEmbedding,
             @Param("limit") int limit);
 

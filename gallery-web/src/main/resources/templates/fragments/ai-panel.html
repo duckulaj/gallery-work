@@ -88,6 +88,23 @@
       </div>
     </div>
 
+    <section class="ai-processes" th:if="${!activeProcesses.isEmpty()}">
+      <h3 class="ai-processes-title">Slowest running</h3>
+      <ol class="ai-processes-list">
+        <li class="ai-process" th:each="process : ${activeProcesses}">
+          <div class="ai-process-main">
+            <span class="ai-process-name" th:text="${process.filename}" th:title="${process.filename}">image.jpg</span>
+            <strong class="ai-process-elapsed"
+                    th:text="${process.elapsedMs >= 60000 ? (process.elapsedMs / 60000) + 'm ' + ((process.elapsedMs / 1000) % 60) + 's' : (process.elapsedMs / 1000) + 's'}">0s</strong>
+          </div>
+          <div class="ai-process-stage">
+            <span th:text="${process.stage}">AI tagging/vision</span>
+            <span th:text="${process.stageElapsedMs / 1000} + 's in stage'">0s in stage</span>
+          </div>
+        </li>
+      </ol>
+    </section>
+
     <!-- Status message -->
     <p class="ai-panel-msg"
        th:if="${stats.pending + stats.processing > 0}"

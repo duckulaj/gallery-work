@@ -11,7 +11,10 @@ COPY requirements.txt .
 # blinker is pre-installed as a distutils package in the TF image; reinstall it
 # via pip first so the subsequent install can overwrite it cleanly.
 RUN pip install --no-cache-dir --ignore-installed blinker && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y onnxruntime && \
+    pip install --no-cache-dir onnxruntime-gpu==1.18.0 \
+        --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 
 COPY main.py .
 

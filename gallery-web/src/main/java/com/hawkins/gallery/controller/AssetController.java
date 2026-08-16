@@ -103,6 +103,7 @@ public class AssetController {
     @GetMapping("/assets/ai-panel")
     public String aiPanel(Model model) {
         model.addAttribute("stats", aiEnrichment.stats());
+        model.addAttribute("activeProcesses", aiEnrichment.slowestActiveProcesses());
         return "fragments/ai-panel :: panel";
     }
 
