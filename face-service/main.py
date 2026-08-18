@@ -28,8 +28,10 @@ DETECTOR_BACKEND = os.getenv("DEEPFACE_DETECTOR", "retinaface")
 MIN_CONFIDENCE   = float(os.getenv("DEEPFACE_MIN_CONFIDENCE", "0.5"))
 NSFW_REVIEW_THRESHOLD = float(os.getenv("NSFW_REVIEW_THRESHOLD", "0.65"))
 NSFW_EXPLICIT_THRESHOLD = float(os.getenv("NSFW_EXPLICIT_THRESHOLD", "0.85"))
+AI_REQUIRE_GPU = os.getenv("AI_REQUIRE_GPU", "false").lower() in {"1", "true", "yes"}
 NSFW_SCORING_VERSION = 2
 _nsfw_detector = None
+_accelerators = {"tensorflow": "initializing", "nudenet": "initializing"}
 
 # Only genuinely exposed classes contribute to the NSFW score. Covered body
 # parts, faces, feet, bellies and armpits are intentionally ignored to avoid
@@ -46,10 +48,21 @@ EXPLICIT_CLASSES = {
 # ── Pre-warm model on startup ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global DeepFace
-    get_nsfw_detector()
+    global DeepFace, _accelerators
+    nsfw_detector = get_nsfw_detector()
     from deepface import DeepFace as DeepFaceClass
+    import tensorflow as tf
+
     DeepFace = DeepFaceClass
+    tensorflow_gpus = [device.name for device in tf.config.list_physical_devices("GPU")]
+    nudenet_providers = nsfw_detector.onnx_session.get_providers()
+    _accelerators = {
+        "tensorflow": tensorflow_gpus,
+        "nudenet": nudenet_providers,
+    }
+    if AI_REQUIRE_GPU and (not tensorflow_gpus or "CUDAExecutionProvider" not in nudenet_providers):
+        raise RuntimeError(f"GPU acceleration is required but unavailable: {_accelerators}")
+    print(f"[face-service] Accelerators: {_accelerators}", flush=True)
 
     print(f"[face-service] Pre-warming {MODEL_NAME} with {DETECTOR_BACKEND} …", flush=True)
     try:
@@ -75,7 +88,13 @@ app = FastAPI(title="gallery-face-service", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": MODEL_NAME, "detector": DETECTOR_BACKEND}
+    return {
+        "status": "ok",
+        "model": MODEL_NAME,
+        "detector": DETECTOR_BACKEND,
+        "gpuRequired": AI_REQUIRE_GPU,
+        "accelerators": _accelerators,
+    }
 
 
 def get_nsfw_detector() -> NudeDetector:

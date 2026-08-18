@@ -4,6 +4,6 @@ python-multipart==0.0.20
 numpy<2
 deepface==0.0.93
 opencv-python-headless==4.10.0.84
-tf-keras
+tf-keras==2.16.0
 nudenet==3.4.2
 Pillow>=10.0

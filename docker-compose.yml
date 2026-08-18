@@ -29,6 +29,7 @@ services:
       DEEPFACE_MODEL: ArcFace
       DEEPFACE_DETECTOR: retinaface
       DEEPFACE_MIN_CONFIDENCE: "0.5"
+      AI_REQUIRE_GPU: "true"
     volumes:
       - deepface-weights:/root/.deepface
       - ./data/gallery/face-crops:/data/gallery/face-crops
