@@ -41,10 +41,10 @@ app:
   ai:
     background:
       enabled: true
-      batch-size: 4
-      fixed-delay-ms: 5000
-      embedding-threads: 2
-      connection-pool-size: 4
+      batch-size: 6
+      fixed-delay-ms: 4000
+      embedding-threads: 4
+      connection-pool-size: 6
     vision:
       enabled: true
       model: minicpm-v4.6
