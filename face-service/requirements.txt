@@ -1,9 +1,22 @@
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-python-multipart==0.0.20
-numpy<2
-deepface==0.0.93
+# Web/API layer
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+
+# TensorFlow 2.16.x / DeepFace compatibility.
+# Keep NumPy on the 1.x ABI while this service uses tensorflow/tensorflow:2.16.1-gpu.
+numpy>=1.26,<2
+
+# Face detection / recognition
+deepface==0.0.100
 opencv-python-headless==4.10.0.84
+
+# Must stay aligned with TensorFlow 2.16.x in the Docker base image.
 tf-keras==2.16.0
+
+# NSFW detection. onnxruntime-gpu is installed explicitly in the Dockerfile
+# so the CUDA build is not replaced by NudeNet's CPU runtime dependency.
 nudenet==3.4.2
-Pillow>=10.0
+
+# Image handling
+Pillow>=10.0,<13
