@@ -14,9 +14,19 @@ if [[ -z "${JAR:-}" || ! -f "$JAR" ]]; then
 fi
 
 echo "Build successful: $JAR"
-if [[ "${INSTALL_LOCAL:-false}" == "true" ]]; then
-    DEST_DIR="${DEST_DIR:-/home/jonathan/Gallery}"
-    mkdir -p "$DEST_DIR"
-    cp "$JAR" "$DEST_DIR/gallery.jar"
-    echo "Copied to $DEST_DIR/gallery.jar"
-fi
+DEST_DIR="${DEST_DIR:-/home/jonathan/Gallery}"
+DEST_JAR="$DEST_DIR/GalleryApp.jar"
+
+mkdir -p "$DEST_DIR"
+cp "$JAR" "$DEST_JAR"
+cp run-gallery.sh "$DEST_DIR/run-gallery.sh"
+mkdir -p "$DEST_DIR/scripts" "$DEST_DIR/face-service"
+cp scripts/start-infrastructure.sh "$DEST_DIR/scripts/start-infrastructure.sh"
+cp docker-compose.yml "$DEST_DIR/docker-compose.yml"
+cp face-service/Dockerfile face-service/main.py face-service/requirements.txt "$DEST_DIR/face-service/"
+chmod +x "$DEST_DIR/run-gallery.sh"
+chmod +x "$DEST_DIR/scripts/start-infrastructure.sh"
+
+echo "Deployed JAR to $DEST_JAR"
+echo "Copied launcher to $DEST_DIR/run-gallery.sh"
+echo "Copied runtime infrastructure files to $DEST_DIR"
