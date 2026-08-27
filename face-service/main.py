@@ -53,6 +53,19 @@ async def lifespan(app: FastAPI):
     from deepface import DeepFace as DeepFaceClass
     import tensorflow as tf
 
+    # TF grabs several GB of VRAM by default (cuDNN algorithm search, XLA workspace)
+    # even though ArcFace/RetinaFace only need a fraction of it. Cap it with a hard
+    # limit so other GPU consumers (e.g. Ollama's llama-server) have room to offload.
+    gpu_memory_limit_mb = int(os.getenv("DEEPFACE_GPU_MEMORY_LIMIT_MB", "2048"))
+    for gpu in tf.config.list_physical_devices("GPU"):
+        try:
+            tf.config.set_logical_device_configuration(
+                gpu,
+                [tf.config.LogicalDeviceConfiguration(memory_limit=gpu_memory_limit_mb)],
+            )
+        except RuntimeError as exc:
+            print(f"[face-service] Could not set GPU memory limit: {exc}", flush=True)
+
     DeepFace = DeepFaceClass
     tensorflow_gpus = [device.name for device in tf.config.list_physical_devices("GPU")]
     nudenet_providers = nsfw_detector.onnx_session.get_providers()
