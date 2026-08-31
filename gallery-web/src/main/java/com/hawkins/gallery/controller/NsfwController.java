@@ -3,8 +3,6 @@ package com.hawkins.gallery.controller;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.time.Instant;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
@@ -13,16 +11,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
-import com.hawkins.gallery.repository.AssetMetadataRepository;
-import com.hawkins.gallery.repository.AssetRepository;
+import com.hawkins.gallery.service.AssetService;
 
 import lombok.RequiredArgsConstructor;
-
 @Controller
 @RequiredArgsConstructor
 public class NsfwController {
-    private final AssetRepository assets;
-    private final AssetMetadataRepository metadata;
+    private final AssetService assetService;
 
     @Value("${app.ai.nsfw.review-threshold:0.55}")
     private double defaultThreshold;
@@ -39,32 +34,14 @@ public class NsfwController {
     @PostMapping("/review/sensitive/{id}/status")
     public String status(@PathVariable String id, @RequestParam String value,
                          @RequestParam(defaultValue = "0.55") double threshold) {
-        var m = metadata.findById(id).orElseThrow();
-        m.setNsfwReviewStatus(value);
-        m.setNsfwReviewedAt(Instant.now());
-        metadata.save(m);
+        assetService.setNsfwReviewStatus(id, value);
         return "redirect:/review/sensitive?threshold=" + threshold;
     }
 
     @PostMapping("/review/sensitive/{id}/quarantine")
     public String quarantine(@PathVariable String id,
                              @RequestParam(defaultValue = "0.55") double threshold) throws IOException {
-        var asset = assets.findById(id).orElseThrow();
-        Path source = Path.of(asset.getStoragePath()).toAbsolutePath().normalize();
-        Path root = Path.of(quarantineDir).toAbsolutePath().normalize();
-        Files.createDirectories(root);
-        Path destination = uniqueDestination(root.resolve(asset.getFilename()));
-        try {
-            Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE);
-        } catch (java.nio.file.FileSystemException ex) {
-            Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
-        }
-        asset.setStoragePath(destination.toString());
-        assets.save(asset);
-        var m = metadata.findById(id).orElseThrow();
-        m.setNsfwReviewStatus("QUARANTINED");
-        m.setNsfwReviewedAt(Instant.now());
-        metadata.save(m);
+        assetService.moveToQuarantine(id, Path.of(quarantineDir).toAbsolutePath().normalize());
         return "redirect:/review/sensitive?threshold=" + threshold;
     }
 

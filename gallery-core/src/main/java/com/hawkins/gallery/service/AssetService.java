@@ -3,6 +3,7 @@ package com.hawkins.gallery.service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -44,10 +45,8 @@ public class AssetService {
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff");
 
-    /** System-level directories that must never be indexed. */
-    private static final Set<Path> BLOCKED_ROOTS = Set.of(
-            Path.of("/etc"), Path.of("/proc"), Path.of("/sys"),
-            Path.of("/dev"), Path.of("/run"), Path.of("/boot"));
+    /** Only directories under the user's home may be indexed. */
+    private static final Path USER_HOME = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
 
     private final FolderRepository folders;
     private final AssetRepository assets;
@@ -78,11 +77,8 @@ public class AssetService {
         if (!Files.isDirectory(root)) {
             throw new IllegalArgumentException("Directory does not exist: " + root);
         }
-        // Prevent indexing sensitive system directories
-        for (Path blocked : BLOCKED_ROOTS) {
-            if (root.startsWith(blocked)) {
-                throw new IllegalArgumentException("Indexing system directory is not allowed: " + root);
-            }
+        if (!root.startsWith(USER_HOME)) {
+            throw new IllegalArgumentException("Directory is outside the allowed home directory: " + root);
         }
 
         Folder rootAlbum = albumService.resolveRootAlbum(root);
@@ -403,6 +399,65 @@ public class AssetService {
 
     public Optional<Asset> find(String id) {
         return assets.findById(id);
+    }
+
+    public Optional<AssetMetadata> findMetadata(String id) {
+        return metas.findById(id);
+    }
+
+    public List<Asset> findByFolder(String folderId) {
+        return assets.findByFolderIdOrderByCreatedAtDesc(folderId);
+    }
+
+    public List<Asset> findAllById(Iterable<String> ids) {
+        return (List<Asset>) assets.findAllById(ids);
+    }
+
+    public Optional<Folder> findFolder(String id) {
+        return folders.findById(id);
+    }
+
+    public List<Folder> findAllFolders() {
+        return folders.findAll();
+    }
+
+    @Transactional
+    public void setNsfwReviewStatus(String id, String status) {
+        AssetMetadata m = metas.findById(id).orElseThrow();
+        m.setNsfwReviewStatus(status);
+        m.setNsfwReviewedAt(Instant.now());
+        metas.save(m);
+    }
+
+    @Transactional
+    public void moveToQuarantine(String id, Path quarantineDir) throws IOException {
+        Asset asset = assets.findById(id).orElseThrow();
+        Path source = Path.of(asset.getStoragePath()).toAbsolutePath().normalize();
+        Files.createDirectories(quarantineDir);
+        Path dest = uniqueQuarantineDest(quarantineDir, asset.getFilename());
+        try {
+            Files.move(source, dest, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.FileSystemException ex) {
+            Files.move(source, dest, StandardCopyOption.REPLACE_EXISTING);
+        }
+        asset.setStoragePath(dest.toString());
+        assets.save(asset);
+        AssetMetadata m = metas.findById(id).orElseThrow();
+        m.setNsfwReviewStatus("QUARANTINED");
+        m.setNsfwReviewedAt(Instant.now());
+        metas.save(m);
+    }
+
+    private Path uniqueQuarantineDest(Path dir, String filename) {
+        Path candidate = dir.resolve(filename);
+        if (!Files.exists(candidate)) return candidate;
+        int dot = filename.lastIndexOf('.');
+        String base = dot > 0 ? filename.substring(0, dot) : filename;
+        String ext = dot > 0 ? filename.substring(dot) : "";
+        for (int i = 1; ; i++) {
+            candidate = dir.resolve(base + "-" + i + ext);
+            if (!Files.exists(candidate)) return candidate;
+        }
     }
 
     public record DirectoryIndexResult(String directory, int indexed, int skipped, int failed, boolean aiQueued, String rootAlbumId) {

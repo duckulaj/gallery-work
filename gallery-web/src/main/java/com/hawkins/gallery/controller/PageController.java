@@ -7,8 +7,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 
 import com.hawkins.gallery.domain.Folder;
-import com.hawkins.gallery.repository.AssetRepository;
-import com.hawkins.gallery.repository.FolderRepository;
 import com.hawkins.gallery.service.AiEnrichmentService;
 import com.hawkins.gallery.service.AlbumService;
 import com.hawkins.gallery.service.AssetService;
@@ -20,8 +18,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PageController {
     private final AssetService assetService;
-    private final FolderRepository folders;
-    private final AssetRepository assetRepo;
     private final AlbumService albumService;
     private final AiEnrichmentService aiEnrichment;
     private final FaceDetectionService faceDetectionService;
@@ -49,16 +45,16 @@ public class PageController {
     public String folder(@PathVariable String id,
             @RequestHeader(value = "HX-Request", required = false) String hxRequest,
             Model model) {
-        Folder folder = folders.findById(id).orElseGet(assetService::root);
+        Folder folder = assetService.findFolder(id).orElseGet(assetService::root);
         populateWorkspace(model, folder);
         return hxRequest != null ? "fragments/workspace :: workspace" : "index";
     }
 
     private void populateWorkspace(Model model, Folder folder) {
         model.addAttribute("folder", folder);
-        model.addAttribute("folders", folders.findAll());
+        model.addAttribute("folders", assetService.findAllFolders());
         model.addAttribute("albumTree", albumService.buildTree(folder.getId()));
-        model.addAttribute("assets", assetRepo.findByFolderIdOrderByCreatedAtDesc(folder.getId()));
+        model.addAttribute("assets", assetService.findByFolder(folder.getId()));
         model.addAttribute("aiStats", aiEnrichment.stats());
         model.addAttribute("unidentifiedFaceAssets", faceDetectionService.getUnidentifiedFaceAssetIds());
         model.addAttribute("unidentifiedFaceCount", faceDetectionService.getUnidentifiedFaceAssetIds().size());

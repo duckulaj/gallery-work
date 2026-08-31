@@ -2,7 +2,7 @@ spring:
   datasource:
     url: ${GALLERY_DB_URL:jdbc:postgresql://localhost:5432/gallery_ai}
     username: ${GALLERY_DB_USERNAME:gallery_user}
-    password: ${GALLERY_DB_PASSWORD:ja9juja9ju}
+    password: ${GALLERY_DB_PASSWORD}
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:

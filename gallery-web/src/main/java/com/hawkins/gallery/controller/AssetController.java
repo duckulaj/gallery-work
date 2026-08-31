@@ -3,7 +3,6 @@ package com.hawkins.gallery.controller;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -21,8 +20,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.hawkins.gallery.repository.AssetMetadataRepository;
-import com.hawkins.gallery.repository.AssetRepository;
 import com.hawkins.gallery.service.AiEnrichmentService;
 import com.hawkins.gallery.service.AssetService;
 import com.hawkins.gallery.service.FaceDetectionService;
@@ -31,9 +28,11 @@ import com.hawkins.gallery.service.SearchService;
 
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
+@Slf4j
 @Controller
 @RequiredArgsConstructor
 public class AssetController {
@@ -43,8 +42,6 @@ public class AssetController {
 
     private final SearchService search;
     private final AssetService assets;
-    private final AssetRepository assetRepo;
-    private final AssetMetadataRepository metas;
     private final AiEnrichmentService aiEnrichment;
     private final KnownFaceService knownFaces;
     private final FaceDetectionService faceDetectionService;
@@ -115,8 +112,7 @@ public class AssetController {
             cancelled = aiEnrichment.cancelAllInFlight();
             aiEnrichment.deactivateQueue();
         } catch (Exception ex) {
-            // best-effort cancellation; log and continue
-            // note: aiEnrichment may not be available in some tests
+            log.warn("AI halt: could not cancel in-flight tasks: {}", ex.getMessage());
         }
         return ResponseEntity.ok("Halted " + changed + " AI job(s); requested cancellation of " + cancelled + " in-flight tasks");
     }
@@ -127,10 +123,10 @@ public class AssetController {
             @RequestParam(required = false) String faceDescription,
             Model model) {
         var result = knownFaces.addExample(assetId, displayName, faceDescription);
-        var a = assetRepo.findById(assetId).orElseThrow();
+        var a = assets.find(assetId).orElseThrow();
         model.addAttribute("notice", result.message());
         model.addAttribute("asset", a);
-        model.addAttribute("meta", metas.findById(assetId).orElse(null));
+        model.addAttribute("meta", assets.findMetadata(assetId).orElse(null));
         model.addAttribute("knownPersons", knownFaces.summaries());
         return "fragments/preview :: preview";
     }
@@ -138,10 +134,8 @@ public class AssetController {
     @PostMapping("/faces/queue-recognition")
     public String queueFaceRecognition(@RequestParam String folderId, @RequestParam(required = false) String q, Model model) {
         var result = assets.reindexAi(folderId);
-        List<String> assetIds = new ArrayList<>();
-        for (var asset : assetRepo.findByFolderIdOrderByCreatedAtDesc(folderId)) {
-            assetIds.add(asset.getId());
-        }
+        List<String> assetIds = assets.findByFolder(folderId).stream()
+                .map(a -> a.getId()).toList();
         aiEnrichment.trackKnownFaceApplication(assetIds);
         aiEnrichment.activateQueue();
         model.addAttribute("notice", "Known faces updated. " + result.message());
@@ -152,9 +146,9 @@ public class AssetController {
 
     @GetMapping("/assets/{id}/preview")
     public String preview(@PathVariable String id, Model model) {
-        var a = assetRepo.findById(id).orElseThrow();
+        var a = assets.find(id).orElseThrow();
         model.addAttribute("asset", a);
-        model.addAttribute("meta", metas.findById(id).orElse(null));
+        model.addAttribute("meta", assets.findMetadata(id).orElse(null));
         model.addAttribute("knownPersons", knownFaces.summaries());
         model.addAttribute("faceDetections", faceDetectionService.getDetectionsForAsset(id));
         return "fragments/preview :: preview";
@@ -172,14 +166,14 @@ public class AssetController {
 
     @GetMapping("/thumbs/{id}")
     public ResponseEntity<Resource> thumb(@PathVariable String id) throws Exception {
-        var a = assetRepo.findById(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
+        var a = assets.find(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         Path p = resolveAssetPath(Optional.ofNullable(a.getThumbnailPath()).orElse(a.getStoragePath()));
         return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).body(new FileSystemResource(p));
     }
 
     @GetMapping("/files/{id}")
     public ResponseEntity<Resource> file(@PathVariable String id) throws Exception {
-        var a = assetRepo.findById(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
+        var a = assets.find(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         Path p = resolveAssetPath(a.getStoragePath());
         MediaType mediaType = safeMediaType(a.getContentType());
         return ResponseEntity.ok().contentType(mediaType).body(new FileSystemResource(p));

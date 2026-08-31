@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -53,6 +54,7 @@ public class AiEnrichmentService {
     private final AtomicBoolean knownFaceApplicationActive = new AtomicBoolean();
     private final AtomicInteger knownFaceMatches = new AtomicInteger();
     private final java.util.Set<String> knownFaceApplicationAssets = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final ReentrantLock knownFaceLock = new ReentrantLock();
     private TransactionTemplate txTemplate;
 
     @Value("${app.ai.background.enabled:true}")
@@ -80,11 +82,16 @@ public class AiEnrichmentService {
     }
 
     public void trackKnownFaceApplication(Collection<String> assetIds) {
-        knownFaceMatches.set(0);
-        knownFaceApplicationAssets.clear();
-        knownFaceApplicationAssets.addAll(assetIds);
-        knownFaceApplicationActive.set(true);
-        log.info("Apply known faces started for {} asset(s)", assetIds.size());
+        knownFaceLock.lock();
+        try {
+            knownFaceMatches.set(0);
+            knownFaceApplicationAssets.clear();
+            knownFaceApplicationAssets.addAll(assetIds);
+            knownFaceApplicationActive.set(true);
+            log.info("Apply known faces started for {} asset(s)", assetIds.size());
+        } finally {
+            knownFaceLock.unlock();
+        }
     }
 
     @PostConstruct
@@ -112,9 +119,14 @@ public class AiEnrichmentService {
 
         var ids = metas.findNextAiQueueBatch(Math.max(1, batchSize));
         if (ids.isEmpty()) {
-            if (knownFaceApplicationActive.compareAndSet(true, false)) {
-                log.info("Apply known faces complete: {} face(s) matched", knownFaceMatches.get());
-                knownFaceApplicationAssets.clear();
+            knownFaceLock.lock();
+            try {
+                if (knownFaceApplicationActive.compareAndSet(true, false)) {
+                    log.info("Apply known faces complete: {} face(s) matched", knownFaceMatches.get());
+                    knownFaceApplicationAssets.clear();
+                }
+            } finally {
+                knownFaceLock.unlock();
             }
             return;
         }

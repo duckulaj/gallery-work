@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-gallery_ai}
       POSTGRES_USER: ${POSTGRES_USER:-gallery_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ja9juja9ju}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     ports:
       - "5432:5432"
     volumes:

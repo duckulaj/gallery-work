@@ -17,10 +17,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.hawkins.gallery.domain.Asset;
-import com.hawkins.gallery.repository.AssetRepository;
-import com.hawkins.gallery.repository.AssetMetadataRepository;
 import com.hawkins.gallery.repository.FaceDetectionRepository;
+import com.hawkins.gallery.service.AssetService;
 import com.hawkins.gallery.service.FaceDetectionService;
 import com.hawkins.gallery.service.KnownFaceService;
 
@@ -32,10 +30,9 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RequiredArgsConstructor
 public class FaceController {
 
+    private final AssetService assetService;
     private final FaceDetectionService faceDetectionService;
     private final FaceDetectionRepository faceDetectionRepo;
-    private final AssetRepository assetRepo;
-    private final AssetMetadataRepository metas;
     private final KnownFaceService knownFaces;
 
     /**
@@ -45,10 +42,7 @@ public class FaceController {
     @GetMapping("/faces/unidentified")
     public String unidentifiedFaces(Model model) {
         List<String> assetIds = faceDetectionRepo.findAssetIdsWithUnidentifiedFaces();
-        List<Asset> assets = assetIds.stream()
-                .map(id -> assetRepo.findById(id).orElse(null))
-                .filter(a -> a != null)
-                .toList();
+        var assets = assetService.findAllById(assetIds);
         model.addAttribute("assets", assets);
         model.addAttribute("unidentifiedFaceAssets", faceDetectionService.getUnidentifiedFaceAssetIds());
         model.addAttribute("notice", assets.isEmpty()
@@ -62,10 +56,10 @@ public class FaceController {
      */
     @GetMapping("/faces/asset/{assetId}")
     public String facePreview(@PathVariable String assetId, Model model) {
-        var asset = assetRepo.findById(assetId)
+        var asset = assetService.find(assetId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         model.addAttribute("asset", asset);
-        model.addAttribute("meta", metas.findById(assetId).orElse(null));
+        model.addAttribute("meta", assetService.findMetadata(assetId).orElse(null));
         model.addAttribute("knownPersons", knownFaces.summaries());
         model.addAttribute("faceDetections", faceDetectionService.getDetectionsForAsset(assetId));
         return "fragments/preview :: preview";
@@ -81,10 +75,10 @@ public class FaceController {
                                Model model) {
         faceDetectionService.enrollFace(detectionId, displayName);
 
-        var asset = assetRepo.findById(assetId)
+        var asset = assetService.find(assetId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         model.addAttribute("asset", asset);
-        model.addAttribute("meta", metas.findById(assetId).orElse(null));
+        model.addAttribute("meta", assetService.findMetadata(assetId).orElse(null));
         model.addAttribute("knownPersons", knownFaces.summaries());
         model.addAttribute("faceDetections", faceDetectionService.getDetectionsForAsset(assetId));
         model.addAttribute("notice", "Face labelled as '" + displayName.trim() + "'.");

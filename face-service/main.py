@@ -310,6 +310,24 @@ async def detect_nsfw(file: UploadFile = File(...)):
         _safe_unlink(tmp_path)
 
 
+_DETECT_ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+_MAGIC_BYTES = {
+    b"\xff\xd8\xff",          # JPEG
+    b"\x89PNG",               # PNG
+    b"GIF8",                  # GIF87a / GIF89a
+    b"BM",                    # BMP
+}
+
+
+def _is_allowed_image(contents: bytes, suffix: str) -> bool:
+    if suffix not in _DETECT_ALLOWED_SUFFIXES:
+        return False
+    # WebP: RIFF....WEBP
+    if len(contents) >= 12 and contents[:4] == b"RIFF" and contents[8:12] == b"WEBP":
+        return True
+    return any(contents[: len(magic)] == magic for magic in _MAGIC_BYTES)
+
+
 @app.post("/detect")
 async def detect_faces(file: UploadFile = File(...)):
     """
@@ -323,7 +341,16 @@ async def detect_faces(file: UploadFile = File(...)):
 
     try:
         contents = await file.read()
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+
+        supplied_suffix = Path(file.filename or "image.jpg").suffix.lower()
+        if not _is_allowed_image(contents, supplied_suffix):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Unsupported file type", "faces": []},
+            )
+
+        suffix = supplied_suffix if supplied_suffix in _DETECT_ALLOWED_SUFFIXES else ".jpg"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(contents)
             tmp_path = tmp.name
 
