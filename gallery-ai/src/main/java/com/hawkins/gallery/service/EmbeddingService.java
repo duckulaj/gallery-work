@@ -1,7 +1,5 @@
 package com.hawkins.gallery.service;
 
-import java.util.List;
-
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -25,17 +23,6 @@ public class EmbeddingService {
         float[] result = embeddingModel.embed(text == null ? "" : text);
         log.info("Embedding generated in {}ms", System.currentTimeMillis() - start);
         return result;
-    }
-
-    public List<float[]> embedBatch(List<String> texts) {
-        if (texts == null || texts.isEmpty()) {
-            return List.of();
-        }
-        List<String> sanitized = texts.stream().map(t -> t == null ? "" : t).toList();
-        long start = System.currentTimeMillis();
-        List<float[]> results = embeddingModel.embed(sanitized);
-        log.info("Batch embedding of {} text(s) generated in {}ms", sanitized.size(), System.currentTimeMillis() - start);
-        return results;
     }
 
     public String toJson(float[] v) {
@@ -72,7 +59,7 @@ public class EmbeddingService {
 
     public float[] fromJson(String json) {
         try {
-            List<Double> d = mapper.readValue(json, new TypeReference<>() {
+            java.util.List<Double> d = mapper.readValue(json, new TypeReference<>() {
             });
             float[] f = new float[d.size()];
             for (int i = 0; i < d.size(); i++)

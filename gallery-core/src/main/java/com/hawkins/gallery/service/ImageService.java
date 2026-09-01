@@ -71,6 +71,25 @@ public class ImageService {
         return out;
     }
 
+    /** Decode an image once to obtain dimensions and create its thumbnail. */
+    public PreparedImage prepare(Path original, String id) throws IOException {
+        ensureDirs();
+        BufferedImage image = ImageIO.read(original.toFile());
+        if (image == null) {
+            throw new IOException("Unsupported or corrupt image: " + original);
+        }
+        Path out = props.storageRoot().resolve("thumbs").resolve(id + ".jpg");
+        Thumbnails.of(image)
+                .size(props.thumbnailSize(), props.thumbnailSize())
+                .keepAspectRatio(true)
+                .outputQuality(0.85)
+                .outputFormat("jpg")
+                .toFile(out.toFile());
+        return new PreparedImage(image.getWidth(), image.getHeight(), out);
+    }
+
+    public record PreparedImage(int width, int height, Path thumbnail) { }
+
     public byte[] resizeForAi(Path original) throws IOException {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         int size = props.ai().vision().resizeSize();

@@ -4,9 +4,15 @@ spring:
     username: ${GALLERY_DB_USERNAME:gallery_user}
     password: ${GALLERY_DB_PASSWORD}
   jpa:
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
   flyway:
     enabled: true
     validate-on-migrate: false
@@ -16,7 +22,7 @@ spring:
     type: caffeine
     cache-names: query-expansions,embeddings
     caffeine:
-      spec: maximumSize=1000,expireAfterAccess=2h
+      spec: recordStats,maximumSize=1000,expireAfterAccess=2h
   servlet:
     multipart:
       max-file-size: 50MB
@@ -46,7 +52,7 @@ app:
   ai:
     background:
       enabled: true
-      batch-size: 6
+      max-in-flight: 6
       fixed-delay-ms: 4000
       embedding-threads: 4
       connection-pool-size: 6

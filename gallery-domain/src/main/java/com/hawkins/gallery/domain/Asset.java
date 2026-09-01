@@ -17,19 +17,9 @@ import lombok.Setter;
 
 @NamedNativeQuery(
     name = "Asset.fullTextSearch",
-    query = "SELECT DISTINCT a.* FROM assets a LEFT JOIN asset_metadata m ON m.asset_id=a.id" +
-            " WHERE (to_tsvector('english', a.filename) @@ plainto_tsquery('english', ?1) OR" +
-            " to_tsvector('english', coalesce(m.title,'') || ' ' || coalesce(m.description,'') || ' ' || coalesce(m.ai_caption,'') || ' ' || coalesce(m.ai_tags,'') || ' ' || coalesce(m.dominant_colors,'') || ' ' || coalesce(m.face_names,'') || ' ' || coalesce(m.face_descriptions,'') || ' ' || coalesce(m.scene_type,'') || ' ' || coalesce(m.scene_labels,'')) @@ plainto_tsquery('english', ?1) OR" +
-            " a.filename ILIKE '%' || ?1 || '%' OR" +
-            " m.title ILIKE '%' || ?1 || '%' OR" +
-            " m.description ILIKE '%' || ?1 || '%' OR" +
-            " m.ai_tags ILIKE '%' || ?1 || '%' OR" +
-            " m.ai_caption ILIKE '%' || ?1 || '%' OR" +
-            " m.dominant_colors ILIKE '%' || ?1 || '%' OR" +
-            " m.face_names ILIKE '%' || ?1 || '%' OR" +
-            " m.face_descriptions ILIKE '%' || ?1 || '%' OR" +
-            " m.scene_type ILIKE '%' || ?1 || '%' OR" +
-            " m.scene_labels ILIKE '%' || ?1 || '%'" +
+    query = "SELECT a.* FROM assets a LEFT JOIN asset_metadata m ON m.asset_id=a.id" +
+            " WHERE a.folder_id = ?2 AND (to_tsvector('english', a.filename) @@ plainto_tsquery('english', ?1) OR" +
+            " to_tsvector('english', coalesce(m.title,'') || ' ' || coalesce(m.description,'') || ' ' || coalesce(m.ai_caption,'') || ' ' || coalesce(m.ai_tags,'') || ' ' || coalesce(m.dominant_colors,'') || ' ' || coalesce(m.face_names,'') || ' ' || coalesce(m.face_descriptions,'') || ' ' || coalesce(m.scene_type,'') || ' ' || coalesce(m.scene_labels,'')) @@ plainto_tsquery('english', ?1)" +
             ") ORDER BY a.created_at DESC LIMIT 200",
     resultClass = Asset.class
 )

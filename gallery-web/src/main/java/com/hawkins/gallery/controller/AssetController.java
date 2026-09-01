@@ -1,7 +1,6 @@
 package com.hawkins.gallery.controller;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -63,6 +62,7 @@ public class AssetController {
             @RequestHeader(value = "HX-Request", required = false) String hxRequest,
             HttpServletResponse response) throws IOException {
         var result = assets.indexDirectory(folderId, directoryPath, recursive);
+        aiEnrichment.activateQueue();
         String target = "/folders/" + result.rootAlbumId();
         if (hxRequest != null) {
             response.setHeader("HX-Redirect", target);

@@ -103,7 +103,7 @@
 
   <button type="button"
           class="icon btn-danger"
-          th:if="${!(folder.parent == null && folder.name == 'Gallery')}"
+          th:if="${canDeleteFolder}"
           th:attr="hx-delete=@{/albums/{id}(id=${folder.id})}"
           hx-confirm="Delete this entire album and all its images? This cannot be undone."
           hx-indicator="#toolbar-indicator">

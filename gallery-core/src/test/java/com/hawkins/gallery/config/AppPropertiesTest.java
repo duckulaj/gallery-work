@@ -18,7 +18,7 @@ class AppPropertiesTest {
                 420,
                 5000,
                 new AppProperties.Ai(
-                        new AppProperties.Background(true, 6, 4000, 0, 6),
+                        new AppProperties.Background(true, 6, null, 4000, 0, 6),
                         null,
                         null,
                         new AppProperties.Nsfw(true, "http://localhost:8082", -0.1, 1.1,
@@ -39,5 +39,12 @@ class AppPropertiesTest {
 
         assertThat(properties.storageRoot()).isAbsolute();
         assertThat(properties.storageRoot().resolve("thumbs")).isEqualTo(Path.of("/var/lib/gallery/thumbs"));
+    }
+
+    @Test
+    void resolvesLegacyAiBatchSizeAsMaxInFlight() {
+        var background = new AppProperties.Background(true, null, 8, 4000, 4, 6);
+
+        assertThat(background.effectiveMaxInFlight()).isEqualTo(8);
     }
 }

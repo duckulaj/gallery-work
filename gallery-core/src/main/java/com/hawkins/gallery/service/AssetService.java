@@ -3,7 +3,9 @@ package com.hawkins.gallery.service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,13 +14,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -93,18 +93,19 @@ public class AssetService {
         int failed = 0;
 
         try {
-            Set<Path> foldersToSkip = foldersToSkip(root, maxDepth, recursive);
-            Map<String, Folder> albumByDir = resolveAlbums(root, rootAlbum, maxDepth, foldersToSkip, recursive);
-
-            List<Path> candidates;
-            try (Stream<Path> stream = Files.walk(root, maxDepth)) {
-                candidates = stream
-                        .filter(Files::isRegularFile)
-                        .filter(this::looksLikeImage)
+            TreeScan tree = scanTree(root, maxDepth);
+            Set<Path> foldersToSkip = foldersToSkip(root, tree.directories(), tree.images(), recursive);
+            Map<String, Folder> albumByDir = resolveAlbums(root, rootAlbum, tree.directories(), foldersToSkip, recursive);
+            Set<AssetIdentity> knownAssets = new HashSet<>();
+            assets.findByFolderIdIn(albumByDir.values().stream().map(Folder::getId).collect(java.util.stream.Collectors.toSet()))
+                    .forEach(asset -> {
+                        knownAssets.add(new AssetIdentity(asset.getFolder().getId(), asset.getChecksum(), null));
+                        knownAssets.add(new AssetIdentity(asset.getFolder().getId(), null, asset.getStoragePath()));
+                    });
+            List<Path> candidates = tree.images().stream()
                         .filter(p -> !isUnderFolderToSkip(p, foldersToSkip))
                         .sorted()
                         .toList();
-            }
 
             for (Path image : candidates) {
                 try {
@@ -112,13 +113,16 @@ public class AssetService {
                     Path normalized = image.toAbsolutePath().normalize();
                     String targetFolderId = albumByDir.getOrDefault(
                             normalized.getParent().toAbsolutePath().normalize().toString(), rootAlbum).getId();
-                    if (assets.existsByFolderIdAndChecksum(targetFolderId, checksum)
-                            || assets.existsByFolderIdAndStoragePath(targetFolderId, normalized.toString())) {
+                    if (knownAssets.contains(new AssetIdentity(targetFolderId, checksum, null))
+                            || knownAssets.contains(new AssetIdentity(targetFolderId, null, normalized.toString()))) {
                         skipped++;
                         continue;
                     }
                     newAssetTransaction().executeWithoutResult(status ->
-                            createAssetInternal(targetFolderId, normalized, image.getFileName().toString(), contentType(image)));
+                            createAssetInternal(targetFolderId, normalized, image.getFileName().toString(),
+                                    contentType(image), checksum));
+                    knownAssets.add(new AssetIdentity(targetFolderId, checksum, null));
+                    knownAssets.add(new AssetIdentity(targetFolderId, null, normalized.toString()));
                     indexed++;
                 } catch (DataIntegrityViolationException ex) {
                     // Concurrent indexing already inserted this asset; treat as skipped
@@ -144,10 +148,29 @@ public class AssetService {
         }
     }
 
+    private TreeScan scanTree(Path root, int maxDepth) throws IOException {
+        List<Path> directories = new java.util.ArrayList<>();
+        List<Path> imagesFound = new java.util.ArrayList<>();
+        Files.walkFileTree(root, java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class), maxDepth,
+                new SimpleFileVisitor<>() {
+                    @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                        directories.add(dir);
+                        return FileVisitResult.CONTINUE;
+                    }
+                    @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        if (attrs.isRegularFile() && looksLikeImage(file)) imagesFound.add(file);
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+        return new TreeScan(directories, imagesFound);
+    }
+
+    @Transactional
     public DirectoryIndexResult reindexAi(String folderId) {
         return queueAiForFolder(folderId, true);
     }
 
+    @Transactional
     public DirectoryIndexResult queueMissingAi(String folderId) {
         return queueAiForFolder(folderId, false);
     }
@@ -158,16 +181,9 @@ public class AssetService {
      *
      * @return total number of assets queued
      */
+    @Transactional
     public int queueMissingAiGlobal() {
-        int total = 0;
-        for (var folder : folders.findAll()) {
-            try {
-                total += queueAiForFolder(folder.getId(), false).indexed();
-            } catch (Exception e) {
-                log.warn("Night scheduler: failed to queue missing AI for folder {}: {}", folder.getId(), e.getMessage());
-            }
-        }
-        return total;
+        return metas.queueMissingGlobal();
     }
 
     /**
@@ -177,97 +193,32 @@ public class AssetService {
      *
      * @return total number of assets queued
      */
+    @Transactional
     public int applyKnownFacesGlobal() {
-        int total = 0;
-        for (var folder : folders.findAll()) {
-            try {
-                total += queueAiForFolder(folder.getId(), true).indexed();
-            } catch (Exception e) {
-                log.warn("Night scheduler: failed to apply known faces for folder {}: {}", folder.getId(), e.getMessage());
-            }
-        }
-        return total;
+        return metas.queueAllGlobal();
     }
 
     @Transactional
     public int haltAiProcessing() {
-        // Find all metadata rows that are pending, retry or currently processing
-        var statuses = java.util.List.of(AiStatus.PENDING, AiStatus.RETRY, AiStatus.PROCESSING);
-        var list = metas.findByAiStatusIn(statuses);
-        int changed = 0;
-        Instant now = Instant.now();
-        for (var m : list) {
-            AiStatus current = m.getAiStatus();
-            if (current == AiStatus.PENDING || current == AiStatus.RETRY || current == AiStatus.PROCESSING) {
-                m.setAiStatus(AiStatus.CANCELLED);
-                m.setAiError("Cancelled by user");
-                m.setAiUpdatedAt(now);
-                metas.save(m);
-                changed++;
-            }
-        }
+        int changed = metas.cancelActive();
         log.info("Halted {} AI jobs (pending/processing)", changed);
         return changed;
     }
 
     private DirectoryIndexResult queueAiForFolder(String folderId, boolean force) {
-        List<Asset> candidates = assets.findByFolderIdOrderByCreatedAtDesc(folderId);
-        int queued = 0;
-        int skipped = 0;
-        int failed = 0;
-
-        for (Asset asset : candidates) {
-            try {
-                boolean changed = Boolean.TRUE.equals(newAssetTransaction().execute(status -> queueAssetAiInternal(asset.getId(), force)));
-                if (changed) {
-                    queued++;
-                } else {
-                    skipped++;
-                }
-            } catch (TransactionException ex) {
-                failed++;
-            }
-        }
-
-        return new DirectoryIndexResult(force ? "existing folder assets" : "assets missing AI metadata", queued, skipped, failed, true, null);
-    }
-
-    private boolean queueAssetAiInternal(String assetId, boolean force) {
-        Asset asset = assets.findById(assetId).orElseThrow();
-        AssetMetadata m = metas.findById(assetId).orElseGet(AssetMetadata::new);
-        m.setAsset(asset);
-
-        AiStatus currentStatus = m.getAiStatus();
-        boolean isIncomplete = currentStatus == AiStatus.CANCELLED || currentStatus == AiStatus.FAILED;
-        if (!force && !isIncomplete && hasAiMetadata(m)) {
-            return false;
-        }
-
-        m.setAiStatus(AiStatus.PENDING);
-        m.setAiError(null);
-        m.setAiUpdatedAt(Instant.now());
-        metas.save(m);
-        return true;
-    }
-
-    private boolean hasAiMetadata(AssetMetadata m) {
-        return notBlank(m.getAiCaption())
-                || notBlank(m.getAiTags())
-                || notBlank(m.getDominantColors())
-                || notBlank(m.getFaceNames())
-                || notBlank(m.getSceneType())
-                || notBlank(m.getSceneLabels());
-    }
-
-    private boolean notBlank(String value) {
-        return value != null && !value.isBlank() && !"[]".equals(value.trim());
+        long total = assets.countByFolderId(folderId);
+        int queued = metas.queueFolder(folderId, force);
+        int skipped = (int) Math.max(0, total - queued);
+        return new DirectoryIndexResult(force ? "existing folder assets" : "assets missing AI metadata",
+                queued, skipped, 0, true, null);
     }
 
     private TransactionTemplate newAssetTransaction() {
         return requiresNewTx;
     }
 
-    private Asset createAssetInternal(String folderId, Path original, String filename, String contentType) {
+    private Asset createAssetInternal(String folderId, Path original, String filename, String contentType,
+            String checksum) {
         try {
             images.ensureDirs();
             Folder folder = folders.findById(folderId).orElseThrow();
@@ -277,13 +228,12 @@ public class AssetService {
             a.setContentType(contentType);
             a.setSizeBytes(Files.size(original));
             a.setStoragePath(original.toString());
-            a.setChecksum(images.sha256(original));
-            int[] wh = images.dimensions(original);
-            a.setWidth(wh[0]);
-            a.setHeight(wh[1]);
+            a.setChecksum(checksum);
             if (a.getContentType().startsWith("image/")) {
-                Path thumb = images.thumbnail(original, a.getId());
-                a.setThumbnailPath(thumb.toString());
+                ImageService.PreparedImage prepared = images.prepare(original, a.getId());
+                a.setWidth(prepared.width());
+                a.setHeight(prepared.height());
+                a.setThumbnailPath(prepared.thumbnail().toString());
             }
             Asset saved = assets.save(a);
 
@@ -291,8 +241,8 @@ public class AssetService {
             AssetMetadata m = new AssetMetadata();
             m.setAsset(saved);
             m.setExifJson(mapper.writeValueAsString(exif));
-            // AI status is intentionally left null — enrichment is only queued
-            // when the user explicitly requests it or the night scheduler runs.
+            m.setAiStatus(AiStatus.PENDING);
+            m.setAiUpdatedAt(Instant.now());
             metas.save(m);
             eventPublisher.publishEvent(new AssetIndexedEvent(saved.getId()));
 
@@ -303,39 +253,33 @@ public class AssetService {
     }
 
 
-    private Set<Path> foldersToSkip(Path root, int maxDepth, boolean recursive) throws Exception {
+    private Set<Path> foldersToSkip(Path root, List<Path> tree, List<Path> images, boolean recursive) {
         Set<Path> foldersToSkip = new HashSet<>();
         if (!recursive) {
             return foldersToSkip;
         }
-        try (Stream<Path> dirs = Files.walk(root, maxDepth)) {
-            dirs.filter(Files::isDirectory)
+        tree.stream().filter(Files::isDirectory)
                     .filter(d -> !d.toAbsolutePath().normalize().equals(root))
                     .filter(d -> d.getFileName() != null
                             && (d.getFileName().toString().startsWith(".")
                             || d.getFileName().toString().startsWith("_")))
                     .forEach(hiddenDir -> {
-                        try (Stream<Path> children = Files.list(hiddenDir)) {
-                            if (children.filter(Files::isRegularFile).noneMatch(this::looksLikeImage)) {
-                                foldersToSkip.add(hiddenDir.toAbsolutePath().normalize());
-                            }
-                        } catch (Exception e) {
-                            foldersToSkip.add(hiddenDir.toAbsolutePath().normalize());
+                        Path normalized = hiddenDir.toAbsolutePath().normalize();
+                        if (images.stream().noneMatch(image -> image.toAbsolutePath().normalize().startsWith(normalized))) {
+                            foldersToSkip.add(normalized);
                         }
                     });
-        }
         return foldersToSkip;
     }
 
-    private Map<String, Folder> resolveAlbums(Path root, Folder rootAlbum, int maxDepth, Set<Path> foldersToSkip,
-            boolean recursive) throws Exception {
+    private Map<String, Folder> resolveAlbums(Path root, Folder rootAlbum, List<Path> tree,
+            Set<Path> foldersToSkip, boolean recursive) {
         Map<String, Folder> albumByDir = new HashMap<>();
         albumByDir.put(root.toString(), rootAlbum);
         if (!recursive) {
             return albumByDir;
         }
-        try (Stream<Path> dirs = Files.walk(root, maxDepth).filter(Files::isDirectory)) {
-            dirs.sorted()
+        tree.stream().filter(Files::isDirectory).sorted()
                     .filter(dir -> !isUnderFolderToSkip(dir, foldersToSkip))
                     .forEach(dir -> {
                         Path norm = dir.toAbsolutePath().normalize();
@@ -343,7 +287,6 @@ public class AssetService {
                             albumByDir.put(norm.toString(), albumService.resolveAlbumForDir(norm, root, rootAlbum));
                         }
                     });
-        }
         return albumByDir;
     }
 
@@ -455,4 +398,7 @@ public class AssetService {
                     + ". AI enrichment is queued in the background.";
         }
     }
+
+    private record AssetIdentity(String folderId, String checksum, String storagePath) { }
+    private record TreeScan(List<Path> directories, List<Path> images) { }
 }

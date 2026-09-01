@@ -43,7 +43,7 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
-    public List<ReviewCard> cards(String filter, double threshold, String query) {
+    public CardPage cards(String filter, double threshold, String query, int page) {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         String normalFilter = switch (filter == null ? "Flagged" : filter) {
             case "All" -> "ALL";
@@ -54,32 +54,20 @@ public class ReviewService {
             case "Errors" -> "ERROR";
             default -> "ALL";
         };
-        return reviews.findCards(normalFilter, threshold, q, PageRequest.of(0, 1000)).stream()
-                .map(ReviewCard::of).toList();
+        int safePage = Math.max(0, page);
+        var slice = reviews.findCards(normalFilter, threshold, q, PageRequest.of(safePage, 100));
+        List<ReviewCard> cards = slice.getContent().stream().map(ReviewCard::of).toList();
+        return new CardPage(cards, safePage, slice.hasNext());
     }
 
     @Transactional
     public int setStatus(Collection<String> ids, ReviewStatus status) {
-        int changed = 0;
-        for (String id : ids) {
-            AssetReview review = reviews.findById(id).orElseGet(AssetReview::new);
-            review.setAssetId(id);
-            review.setReviewStatus(status);
-            review.setManualOverride(true);
-            review.setReviewedAt(Instant.now());
-            reviews.save(review);
-            changed++;
-        }
-        return changed;
+        return ids.isEmpty() ? 0 : reviews.bulkSetStatus(ids, status.name());
     }
 
     @Transactional
     public int queueNsfw(Collection<String> ids, boolean force) {
-        Collection<String> targets = (ids == null || ids.isEmpty())
-                ? assets.findAll().stream().map(Asset::getId).toList()
-                : ids;
-        targets.forEach(id -> queue.enqueue(id, JobType.NSFW, 40, force));
-        return targets.size();
+        return queue.enqueueNsfw(ids, force);
     }
 
     public int quarantine(Collection<String> ids) throws IOException {
@@ -215,12 +203,9 @@ public class ReviewService {
     }
 
     public Counts counts(double threshold) {
-        long total = assets.count();
-        long reviewed = reviews.count();
-        return new Counts(total, reviews.countFlagged(threshold), reviews.countByReviewStatus(ReviewStatus.KEPT),
-                reviews.countByReviewStatus(ReviewStatus.QUARANTINED),
-                total - reviewed + reviews.countByReviewStatus(ReviewStatus.PENDING),
-                reviews.countByReviewStatus(ReviewStatus.ERROR));
+        var row = reviews.aggregateCounts(threshold);
+        return new Counts(row.getTotal(), row.getFlagged(), row.getKept(), row.getQuarantined(),
+                row.getPending(), row.getErrors());
     }
 
     private Path uniqueTarget(Path filename) throws IOException {
@@ -258,4 +243,5 @@ public class ReviewService {
         }
     }
     public record Counts(long total, long flagged, long kept, long quarantined, long pending, long errors) { }
+    public record CardPage(List<ReviewCard> cards, int page, boolean hasNext) { }
 }

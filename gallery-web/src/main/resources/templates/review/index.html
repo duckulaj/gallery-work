@@ -53,6 +53,12 @@
     <div class="empty" th:if="${#lists.isEmpty(cards)}">No photos match this review filter.</div>
   </section>
 
+  <nav class="review-pages" aria-label="Review pages">
+    <button th:if="${page > 0}" th:onclick="|Review.page(${page - 1})|">Previous</button>
+    <span th:text="|Page ${page + 1}|">Page 1</span>
+    <button th:if="${hasNext}" th:onclick="|Review.page(${page + 1})|">Next</button>
+  </nav>
+
   <footer class="status-dock">
     <div class="progress-track"><div id="queueProgress"></div></div>
     <strong id="scanLabel" th:text="|${queue.pending} pending • ${queue.running} processing|">Idle</strong>

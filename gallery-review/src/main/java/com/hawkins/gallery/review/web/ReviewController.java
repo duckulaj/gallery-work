@@ -26,16 +26,18 @@ public class ReviewController {
     @GetMapping
     public String page(@RequestParam(defaultValue="Flagged") String filter,
                        @RequestParam(defaultValue="0.65") @DecimalMin("0") @DecimalMax("1") double threshold,
-                       @RequestParam(defaultValue="") String q, Model model) {
-        populate(model, filter, threshold, q);
+                       @RequestParam(defaultValue="") String q,
+                       @RequestParam(defaultValue="0") int page, Model model) {
+        populate(model, filter, threshold, q, page);
         return "review/index";
     }
 
     @GetMapping("/grid")
     public String grid(@RequestParam(defaultValue="Flagged") String filter,
                        @RequestParam(defaultValue="0.65") @DecimalMin("0") @DecimalMax("1") double threshold,
-                       @RequestParam(defaultValue="") String q, Model model) {
-        populate(model, filter, threshold, q);
+                       @RequestParam(defaultValue="") String q,
+                       @RequestParam(defaultValue="0") int page, Model model) {
+        populate(model, filter, threshold, q, page);
         return "review/index :: workspace";
     }
 
@@ -64,8 +66,11 @@ public class ReviewController {
         return ResponseEntity.ok(java.util.Map.of("changed", review.restore(request.ids())));
     }
 
-    private void populate(Model model, String filter, double threshold, String q) {
-        model.addAttribute("cards", review.cards(filter, threshold, q));
+    private void populate(Model model, String filter, double threshold, String q, int page) {
+        var result = review.cards(filter, threshold, q, page);
+        model.addAttribute("cards", result.cards());
+        model.addAttribute("page", result.page());
+        model.addAttribute("hasNext", result.hasNext());
         model.addAttribute("counts", review.counts(threshold));
         model.addAttribute("queue", queue.stats());
         model.addAttribute("filter", filter); model.addAttribute("threshold", threshold); model.addAttribute("q", q);

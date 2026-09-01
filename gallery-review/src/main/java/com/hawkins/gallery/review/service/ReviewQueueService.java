@@ -23,8 +23,8 @@ public class ReviewQueueService {
     @Transactional
     public void enqueue(String assetId, JobType type, int priority, boolean force) {
         ProcessingJob job = jobs.findByAssetIdAndJobType(assetId, type).orElseGet(ProcessingJob::new);
-        if (!force && job.getId() != null
-                && (job.getStatus() == JobStatus.COMPLETED || job.getStatus() == JobStatus.RUNNING)) return;
+        if (job.getId() != null && job.getStatus() == JobStatus.RUNNING) return;
+        if (!force && job.getId() != null && job.getStatus() == JobStatus.COMPLETED) return;
         job.setAssetId(assetId);
         job.setJobType(type);
         job.setPriority(priority);
@@ -80,6 +80,19 @@ public class ReviewQueueService {
     public QueueStats stats() {
         return new QueueStats(jobs.countByStatus(JobStatus.PENDING), jobs.countByStatus(JobStatus.RUNNING),
                 jobs.countByStatus(JobStatus.COMPLETED), jobs.countByStatus(JobStatus.FAILED));
+    }
+
+    @Transactional
+    public int enqueueNsfw(Collection<String> assetIds, boolean force) {
+        boolean all = assetIds == null || assetIds.isEmpty();
+        Collection<String> safeIds = all ? List.of("__all__") : assetIds;
+        return jobs.enqueueNsfw(safeIds, all, force);
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(cron = "${app.jobs.cleanup-cron:0 30 3 * * *}")
+    @Transactional
+    public void purgeCompletedHistory() {
+        jobs.deleteCompletedBefore(Instant.now().minus(java.time.Duration.ofDays(30)));
     }
 
     private String trim(String value) {

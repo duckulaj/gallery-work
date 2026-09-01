@@ -4,11 +4,8 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -20,8 +17,6 @@ import lombok.RequiredArgsConstructor;
 public class QueryExpansionService {
     private static final int MAX_TERMS = 12;
 
-    private final ChatClient chatClient;
-
     @Cacheable(value = "query-expansions", unless = "#result.isBlank()")
     public String expand(String query) {
         if (query == null || query.isBlank()) {
@@ -30,27 +25,6 @@ public class QueryExpansionService {
 
         Set<String> terms = new LinkedHashSet<>(tokenise(query));
         terms.addAll(localSynonyms(query));
-
-        try {
-            // Sanitise to prevent prompt injection via crafted search queries
-            String safeQuery = query.trim().replaceAll("[\\r\\n\\t]", " ");
-            String prompt = """
-                    Expand this photo-gallery search query into concise searchable words.
-                    Include object synonyms, common colour spelling variants, face/person descriptors, scene labels, and related image tags.
-                    Return comma-separated words only. Do not explain.
-
-                    Query: %s
-                    """.formatted(safeQuery);
-            String response = CompletableFuture
-                    .supplyAsync(() -> chatClient.prompt().user(prompt).call().content())
-                    .orTimeout(4, TimeUnit.SECONDS)
-                    .join();
-            if (response != null && !response.isBlank()) {
-                terms.addAll(tokenise(response));
-            }
-        } catch (Exception ignored) {
-            // Search must remain fast and robust when the local chat model is offline or slow.
-        }
 
         String expanded = terms.stream()
                 .filter(s -> !s.isBlank())

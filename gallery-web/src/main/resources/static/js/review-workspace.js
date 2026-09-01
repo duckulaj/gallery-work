@@ -2,8 +2,9 @@ const Review=(()=>{let selected=new Set(),timer,poll;
  const ids=()=>[...selected];
  function toggle(e,card){if(e.target.closest('button,a,input,select'))return;const id=card.dataset.id;if(selected.has(id)){selected.delete(id);card.classList.remove('selected')}else{selected.add(id);card.classList.add('selected')}}
  function threshold(v){document.getElementById('thresholdOutput').value=(Number(v)/100).toFixed(2)}
- function query(){return new URLSearchParams({filter:document.getElementById('filter').value,threshold:(Number(document.getElementById('threshold').value)/100).toFixed(2),q:document.getElementById('search').value})}
- async function reload(){selected.clear();const r=await fetch('/review/grid?'+query());const html=await r.text();const d=new DOMParser().parseFromString(html,'text/html');document.getElementById('workspace').replaceWith(d.getElementById('workspace'));startPolling()}
+ function query(page=0){return new URLSearchParams({filter:document.getElementById('filter').value,threshold:(Number(document.getElementById('threshold').value)/100).toFixed(2),q:document.getElementById('search').value,page})}
+ async function reload(page=0){selected.clear();const r=await fetch('/review/grid?'+query(page));const html=await r.text();const d=new DOMParser().parseFromString(html,'text/html');document.getElementById('workspace').replaceWith(d.getElementById('workspace'));startPolling()}
+ function page(number){reload(number)}
  function debounceReload(){clearTimeout(timer);timer=setTimeout(reload,300)}
  async function post(url,body){const token=document.querySelector('meta[name="_csrf"]')?.content,header=document.querySelector('meta[name="_csrf_header"]')?.content;const headers={'Content-Type':'application/json'};if(token&&header)headers[header]=token;const r=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
  function requireSelection(){if(!selected.size){toast('Select one or more photos first');return false}return true}
@@ -15,4 +16,4 @@ const Review=(()=>{let selected=new Set(),timer,poll;
  function startPolling(){clearInterval(poll);updateStats();poll=setInterval(updateStats,1500)}
  function toast(text){const t=document.getElementById('toast');t.textContent=text;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400)}
  document.addEventListener('DOMContentLoaded',startPolling);
- return{toggle,threshold,reload,debounceReload,setStatus,queue,quarantine,restore};})();
+ return{toggle,threshold,reload,page,debounceReload,setStatus,queue,quarantine,restore};})();

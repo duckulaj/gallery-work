@@ -52,6 +52,7 @@ public class PageController {
 
     private void populateWorkspace(Model model, Folder folder) {
         model.addAttribute("folder", folder);
+        model.addAttribute("canDeleteFolder", folder.getSourcePath() != null);
         model.addAttribute("folders", assetService.findAllFolders());
         model.addAttribute("albumTree", albumService.buildTree(folder.getId()));
         model.addAttribute("assets", assetService.findByFolder(folder.getId()));

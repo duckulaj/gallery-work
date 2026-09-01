@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.ExecutorService;
@@ -13,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -24,7 +24,6 @@ import jakarta.annotation.PostConstruct;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hawkins.gallery.domain.AiStatus;
 import com.hawkins.gallery.domain.Asset;
-import com.hawkins.gallery.domain.AssetEmbedding;
 import com.hawkins.gallery.domain.AssetMetadata;
 import com.hawkins.gallery.repository.AssetEmbeddingRepository;
 import com.hawkins.gallery.repository.AssetMetadataRepository;
@@ -48,6 +47,7 @@ public class AiEnrichmentService {
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService enrichmentExecutor;
     private final ObjectMapper mapper;
+    private final ObjectProvider<NsfwDetectionService> nsfwDetection;
     private final java.util.concurrent.ConcurrentMap<String, CompletableFuture<?>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentMap<String, ActiveProcessState> activeProcesses = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean knownFaceApplicationActive = new AtomicBoolean();
@@ -59,8 +59,8 @@ public class AiEnrichmentService {
     @Value("${app.ai.background.enabled:true}")
     private boolean enabled;
 
-    @Value("${app.ai.background.batch-size:2}")
-    private int batchSize;
+    @Value("${app.ai.background.max-in-flight:${app.ai.background.batch-size:2}}")
+    private int maxInFlight;
 
     /**
      * Guards the background scheduler. Starts {@code false} on every JVM start so
@@ -116,7 +116,12 @@ public class AiEnrichmentService {
             return;
         }
 
-        var ids = metas.findNextAiQueueBatch(Math.max(1, batchSize));
+        int availableSlots = Math.max(1, maxInFlight) - inFlight.size();
+        if (availableSlots <= 0) {
+            return;
+        }
+
+        var ids = metas.findNextAiQueueIds(availableSlots);
         if (ids.isEmpty()) {
             knownFaceLock.lock();
             try {
@@ -130,79 +135,46 @@ public class AiEnrichmentService {
             return;
         }
 
-        // Phase 1 — Vision/AI analysis (parallel, all items).
-        // All vision calls are batched together so Ollama processes them with
-        // the vision model fully loaded, then unloads it once for the entire batch.
-        List<CompletableFuture<EnrichmentIntermediate>> visionFutures = ids.stream()
-                .map(id -> {
-                    CompletableFuture<EnrichmentIntermediate> f =
-                            CompletableFuture.supplyAsync(() -> claimAndAnalyse(id), enrichmentExecutor);
-                    // Track in inFlight so cancellation can reach this item
-                    inFlight.put(id, f);
-                    return f;
-                })
-                .toList();
-
-        CompletableFuture.allOf(visionFutures.stream()
-                .map(f -> f.exceptionally(error -> null))
-                .toArray(CompletableFuture[]::new)).join();
-
-        List<EnrichmentIntermediate> intermediates = visionFutures.stream()
-                .map(f -> f.getNow(null))
-                .filter(Objects::nonNull)
-                .toList();
-
-        if (knownFaceApplicationActive.get()) {
-            int matchedFaces = 0;
-            for (EnrichmentIntermediate intermediate : intermediates) {
-                if (intermediate.applyKnownFaces() && intermediate.faceResult() != null) {
-                    matchedFaces += intermediate.faceResult().matchedFaces();
-                }
-            }
-            knownFaceMatches.addAndGet(matchedFaces);
+        for (String id : ids) {
+            inFlight.computeIfAbsent(id, key -> CompletableFuture
+                    .runAsync(() -> processAsset(key), enrichmentExecutor)
+                    .whenComplete((result, error) -> inFlight.remove(key)));
         }
+    }
 
-        if (intermediates.isEmpty()) {
-            ids.forEach(inFlight::remove);
+    private void processAsset(String assetId) {
+        EnrichmentIntermediate intermediate = claimAndAnalyse(assetId);
+        if (intermediate == null) {
             return;
         }
 
-        // Phase 2a — Batch embedding (single model call for the entire batch).
-        // Running this sequentially before Phase 2b ensures the embedding model is loaded
-        // once for all items, eliminating repeated vision↔embedding model-swap overhead.
-        List<String> embeddingTexts = intermediates.stream()
-                .map(ir -> buildEmbeddingText(ir.snapshot(), ir.aiAnalysis(), ir.original()))
-                .toList();
-        intermediates.forEach(ir -> updateActiveStage(ir.assetId(), "Embedding"));
-        List<float[]> vectors;
+        if (intermediate.applyKnownFaces() && intermediate.faceResult() != null) {
+            knownFaceMatches.addAndGet(intermediate.faceResult().matchedFaces());
+        }
+
+        NsfwDetectionService detector = nsfwDetection.getIfAvailable();
+        if (detector != null) {
+            updateActiveStage(assetId, "NSFW detection");
+            try {
+                detector.analyseAsset(assetId);
+            } catch (Exception ex) {
+                log.warn("NSFW detection failed for asset {}: {}", assetId, ex.getMessage());
+            }
+        }
+
+        updateActiveStage(assetId, "Embedding");
         long embedStart = System.currentTimeMillis();
         try {
-            vectors = embed.embedBatch(embeddingTexts);
+            float[] vector = embed.embed(buildEmbeddingText(
+                    intermediate.snapshot(), intermediate.aiAnalysis(), intermediate.original()));
+            long embedMs = System.currentTimeMillis() - embedStart;
+            updateActiveStage(assetId, "Persistence");
+            persistAsset(intermediate, vector, embedMs);
         } catch (Exception ex) {
-            log.error("Batch embedding failed for {} asset(s): {}", intermediates.size(), ex.getMessage());
-            intermediates.forEach(ir -> {
-                markFailed(ir.assetId(), ex);
-                activeProcesses.remove(ir.assetId());
-            });
-            ids.forEach(inFlight::remove);
-            return;
+            log.error("Embedding failed for asset {}: {}", assetId, ex.getMessage());
+            markFailed(assetId, ex);
+            activeProcesses.remove(assetId);
         }
-        long totalEmbedMs = System.currentTimeMillis() - embedStart;
-        long embedMsPerAsset = intermediates.isEmpty() ? 0 : totalEmbedMs / intermediates.size();
-
-        // Phase 2b — Persist (parallel, with pre-computed vectors).
-        List<CompletableFuture<Void>> saveFutures = new java.util.ArrayList<>();
-        for (int i = 0; i < intermediates.size(); i++) {
-            final EnrichmentIntermediate ir = intermediates.get(i);
-            final float[] vector = vectors.get(i);
-            updateActiveStage(ir.assetId(), "Persistence");
-            CompletableFuture<Void> f = CompletableFuture.runAsync(
-                    () -> persistAsset(ir, vector, embedMsPerAsset), enrichmentExecutor);
-            inFlight.put(ir.assetId(), f);
-            f.whenComplete((r, t) -> inFlight.remove(ir.assetId()));
-            saveFutures.add(f);
-        }
-        CompletableFuture.allOf(saveFutures.toArray(new CompletableFuture[0])).join();
     }
 
     /**
@@ -244,7 +216,7 @@ public class AiEnrichmentService {
                 .toList();
     }
 
-    /** Phase 1: claim the asset and run EXIF + vision + face matching. Returns null if skipped/failed. */
+    /** Claim the asset and run EXIF, vision, and face matching. Returns null if skipped or failed. */
     private EnrichmentIntermediate claimAndAnalyse(String assetId) {
         if (!claim(assetId)) {
             return null;
@@ -282,7 +254,7 @@ public class AiEnrichmentService {
         }
     }
 
-    /** Phase 2b: persist pre-computed embedding and AI analysis to the DB. */
+    /** Persist pre-computed embedding and AI analysis to the DB. */
     private void persistAsset(EnrichmentIntermediate ir, float[] vector, long embedMs) {
         try {
             if (Thread.currentThread().isInterrupted()) {
@@ -294,7 +266,7 @@ public class AiEnrichmentService {
                 return;
             }
 
-            log.info("{} | embed: {}ms (batched)", ir.sw().shortSummary(), embedMs);
+            log.info("{} | embed: {}ms", ir.sw().shortSummary(), embedMs);
 
             tx().executeWithoutResult(status -> {
                 Asset asset = assets.findById(ir.assetId()).orElseThrow();

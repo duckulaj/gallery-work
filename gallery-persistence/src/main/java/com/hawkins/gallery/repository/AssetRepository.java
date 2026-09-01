@@ -1,6 +1,7 @@
 package com.hawkins.gallery.repository;
 
 import java.util.List;
+import java.util.Collection;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -10,6 +11,8 @@ import com.hawkins.gallery.domain.Asset;
 
 public interface AssetRepository extends JpaRepository<Asset, String> {
   List<Asset> findByFolderId(String folderId);
+  long countByFolderId(String folderId);
+  List<Asset> findByFolderIdIn(Collection<String> folderIds);
 
   /**
    * Returns all non-null thumbnail_path values for assets in the folder subtree
@@ -31,9 +34,6 @@ public interface AssetRepository extends JpaRepository<Asset, String> {
 
   List<Asset> findByFolderIdOrderByCreatedAtDesc(String folderId);
 
-  List<Asset> fullTextSearch(String q);
+  List<Asset> fullTextSearch(String q, String folderId);
 
-  boolean existsByFolderIdAndChecksum(String folderId, String checksum);
-
-  boolean existsByFolderIdAndStoragePath(String folderId, String storagePath);
 }

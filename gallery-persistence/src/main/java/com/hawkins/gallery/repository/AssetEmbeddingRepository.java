@@ -12,9 +12,6 @@ import com.hawkins.gallery.domain.AssetEmbedding;
 
 public interface AssetEmbeddingRepository extends JpaRepository<AssetEmbedding, String> {
 
-    @Query("select e from AssetEmbedding e join fetch e.asset")
-    List<AssetEmbedding> findAllWithAsset();
-
     /**
      * PostgreSQL/pgvector nearest-neighbour search.
      *
@@ -34,12 +31,20 @@ public interface AssetEmbeddingRepository extends JpaRepository<AssetEmbedding, 
             from asset_embeddings e
             join assets a on a.id = e.asset_id
             where e.embedding is not null
+              and a.folder_id = :folderId
+              and (1.0 - (e.embedding <=> cast(:queryEmbedding as vector))) > :minScore
             order by e.embedding <=> cast(:queryEmbedding as vector)
             limit :limit
             """, nativeQuery = true)
     List<SemanticAssetScoreRow> findNearest(
             @Param("queryEmbedding") String queryEmbedding,
+            @Param("folderId") String folderId,
+            @Param("minScore") float minScore,
             @Param("limit") int limit);
+
+    @Query("select e from AssetEmbedding e join fetch e.asset where e.asset.folder.id = :folderId")
+    List<AssetEmbedding> findAllWithAssetInFolder(@Param("folderId") String folderId,
+            org.springframework.data.domain.Pageable pageable);
 
     /**
      * Upsert the native pgvector embedding while also retaining embedding_json as

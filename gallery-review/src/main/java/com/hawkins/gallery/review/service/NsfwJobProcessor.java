@@ -10,13 +10,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hawkins.gallery.domain.Asset;
 import com.hawkins.gallery.repository.AssetRepository;
+import com.hawkins.gallery.service.NsfwDetectionService;
 import com.hawkins.gallery.review.domain.*;
 import com.hawkins.gallery.review.repository.AssetReviewRepository;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
-public class NsfwJobProcessor {
+public class NsfwJobProcessor implements NsfwDetectionService {
     private final ReviewQueueService queue;
     private final AssetRepository assets;
     private final AssetReviewRepository reviews;
@@ -39,16 +40,29 @@ public class NsfwJobProcessor {
         if (!enabled) return;
         queue.claimNext(JobType.NSFW).ifPresent(job -> {
             try {
-                Asset asset = assets.findById(job.getAssetId()).orElseThrow();
-                NsfwClient.Result result = nsfw.analyse(Path.of(asset.getStoragePath()));
-                transactions.executeWithoutResult(status -> persist(asset, result));
+                analyseAsset(job.getAssetId());
                 queue.complete(job.getId(), job.getWorkerId());
             } catch (Exception ex) {
                 log.warn("NSFW analysis failed for {}", job.getAssetId(), ex);
-                transactions.executeWithoutResult(status -> markError(job.getAssetId(), ex));
                 queue.fail(job.getId(), job.getWorkerId(), ex);
             }
         });
+    }
+
+    @Override
+    public void analyseAsset(String assetId) {
+        try {
+            Asset asset = assets.findById(assetId).orElseThrow();
+            log.info("Invoking NSFW detection for asset {}", assetId);
+            NsfwClient.Result result = nsfw.analyse(Path.of(asset.getStoragePath()));
+            transactions.executeWithoutResult(status -> persist(asset, result));
+            log.info("NSFW detection complete for asset {}: level={}, score={}",
+                    assetId, result.level(), result.score());
+        } catch (Exception ex) {
+            transactions.executeWithoutResult(status -> markError(assetId, ex));
+            throw ex instanceof RuntimeException runtime
+                    ? runtime : new IllegalStateException("NSFW analysis failed for " + assetId, ex);
+        }
     }
 
     private void persist(Asset asset, NsfwClient.Result result) {

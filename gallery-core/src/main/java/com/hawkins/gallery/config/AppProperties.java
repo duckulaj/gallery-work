@@ -50,12 +50,20 @@ public record AppProperties(
 
     public record Background(
             boolean enabled,
-            @Min(1) int batchSize,
+            @Min(1) Integer maxInFlight,
+            @Min(1) Integer batchSize,
             @Min(100) int fixedDelayMs,
             @Min(1) int embeddingThreads,
             @Min(1) int connectionPoolSize) {
+        public int effectiveMaxInFlight() {
+            if (maxInFlight != null) {
+                return maxInFlight;
+            }
+            return batchSize != null ? batchSize : 6;
+        }
+
         static Background defaults() {
-            return new Background(true, 6, 4000, 4, 6);
+            return new Background(true, 6, null, 4000, 4, 6);
         }
     }
 
