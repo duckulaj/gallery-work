@@ -25,6 +25,7 @@ import com.hawkins.gallery.service.AssetService;
 import com.hawkins.gallery.service.FaceDetectionService;
 import com.hawkins.gallery.service.KnownFaceService;
 import com.hawkins.gallery.service.SearchService;
+import com.hawkins.gallery.service.FileAccessPolicy;
 
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class AssetController {
     private final AiEnrichmentService aiEnrichment;
     private final KnownFaceService knownFaces;
     private final FaceDetectionService faceDetectionService;
+    private final FileAccessPolicy fileAccessPolicy;
 
     @GetMapping("/assets")
     public String grid(@RequestParam String folderId, @RequestParam(required = false) String q, Model model) {
@@ -187,11 +189,11 @@ public class AssetController {
         if (rawPath == null || rawPath.isBlank()) {
             throw new ResponseStatusException(NOT_FOUND, "Asset path not set");
         }
-        Path p = Path.of(rawPath).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(p)) {
+        try {
+            return fileAccessPolicy.requireReadableFile(rawPath);
+        } catch (IOException ex) {
             throw new ResponseStatusException(NOT_FOUND, "Asset file not found");
         }
-        return p;
     }
 
     /** Returns the content type only if it is an allowed image MIME type; falls back to octet-stream. */

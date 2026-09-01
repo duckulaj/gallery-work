@@ -9,6 +9,7 @@ POST /nsfw/detect     - classify explicit-content detections with NudeNet
 """
 
 import base64
+import asyncio
 import os
 import tempfile
 import time
@@ -22,6 +23,7 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from nudenet import NudeDetector
 
 DeepFace = None
@@ -34,6 +36,10 @@ MIN_CONFIDENCE = float(os.getenv("DEEPFACE_MIN_CONFIDENCE", "0.5"))
 MIN_FACE_SIZE = int(os.getenv("DEEPFACE_MIN_FACE_SIZE", "20"))
 FACE_CROP_PADDING = float(os.getenv("DEEPFACE_CROP_PADDING", "0.10"))
 JPEG_QUALITY = int(os.getenv("DEEPFACE_CROP_JPEG_QUALITY", "85"))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "60000000"))
+MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", "1"))
+_inference_slots = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
 
 NSFW_REVIEW_THRESHOLD = float(os.getenv("NSFW_REVIEW_THRESHOLD", "0.65"))
 NSFW_EXPLICIT_THRESHOLD = float(os.getenv("NSFW_EXPLICIT_THRESHOLD", "0.85"))
@@ -75,6 +81,25 @@ def _safe_unlink(path: str | None) -> None:
         Path(path).unlink(missing_ok=True)
     except OSError as exc:
         print(f"[face-service] Could not remove temporary file {path}: {exc}", flush=True)
+
+
+async def _save_bounded_upload(file: UploadFile, allowed_suffixes: set[str]) -> tuple[str, str, bytes]:
+    """Stream an upload to disk while enforcing a service-local hard byte limit."""
+    supplied_suffix = Path(file.filename or "image.jpg").suffix.lower()
+    suffix = supplied_suffix if supplied_suffix in allowed_suffixes else ".jpg"
+    total = 0
+    header = bytearray()
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        path = tmp.name
+        while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                _safe_unlink(path)
+                raise ValueError(f"Upload exceeds {MAX_UPLOAD_BYTES} byte limit")
+            if len(header) < 16:
+                header.extend(chunk[: 16 - len(header)])
+            tmp.write(chunk)
+    return path, supplied_suffix, bytes(header)
 
 
 def _runtime_info(tf_module) -> dict[str, str]:
@@ -228,26 +253,17 @@ async def detect_nsfw(file: UploadFile = File(...)):
     tmp_path = None
 
     try:
-        contents = await file.read()
+        tmp_path, _, _ = await _save_bounded_upload(file, {".jpg", ".jpeg", ".png", ".webp"})
         upload_read_ms = (time.perf_counter() - request_started) * 1000
-
-        # Preserve a conventional image suffix for libraries that inspect it,
-        # while avoiding unusual/user-controlled path content.
-        supplied_suffix = Path(file.filename or "image.jpg").suffix.lower()
-        suffix = supplied_suffix if supplied_suffix in {".jpg", ".jpeg", ".png", ".webp"} else ".jpg"
-
-        tempfile_started = time.perf_counter()
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-        tempfile_write_ms = (time.perf_counter() - tempfile_started) * 1000
+        tempfile_write_ms = upload_read_ms
 
         model_started = time.perf_counter()
         detector = get_nsfw_detector()
         model_init_ms = (time.perf_counter() - model_started) * 1000
 
         inference_started = time.perf_counter()
-        detections = detector.detect(tmp_path)
+        async with _inference_slots:
+            detections = await run_in_threadpool(detector.detect, tmp_path)
         inference_ms = (time.perf_counter() - inference_started) * 1000
 
         scoring_started = time.perf_counter()
@@ -295,11 +311,18 @@ async def detect_nsfw(file: UploadFile = File(...)):
                 "profile": profile,
             }
         )
+    except ValueError:
+        return JSONResponse(
+            status_code=413,
+            content={"error": "Upload exceeds the configured size limit", "score": 0.0,
+                     "level": "UNKNOWN", "labels": [], "scoringVersion": NSFW_SCORING_VERSION},
+        )
     except Exception as exc:
+        print(f"[face-service] NSFW detection failed: {exc}", flush=True)
         return JSONResponse(
             status_code=500,
             content={
-                "error": str(exc),
+                "error": "NSFW inference failed",
                 "score": 0.0,
                 "level": "UNKNOWN",
                 "labels": [],
@@ -340,39 +363,40 @@ async def detect_faces(file: UploadFile = File(...)):
     tmp_path = None
 
     try:
-        contents = await file.read()
-
-        supplied_suffix = Path(file.filename or "image.jpg").suffix.lower()
-        if not _is_allowed_image(contents, supplied_suffix):
+        tmp_path, supplied_suffix, header = await _save_bounded_upload(file, _DETECT_ALLOWED_SUFFIXES)
+        if not _is_allowed_image(header, supplied_suffix):
             return JSONResponse(
                 status_code=400,
                 content={"error": "Unsupported file type", "faces": []},
             )
 
-        suffix = supplied_suffix if supplied_suffix in _DETECT_ALLOWED_SUFFIXES else ".jpg"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
-
         # Validate that OpenCV can decode the upload before running the models.
-        img = cv2.imread(tmp_path)
+        img = await run_in_threadpool(cv2.imread, tmp_path)
         if img is None:
             return JSONResponse(
                 status_code=400,
                 content={"error": "Uploaded file is not a decodable image", "faces": []},
+            )
+        if int(img.shape[0]) * int(img.shape[1]) > MAX_IMAGE_PIXELS:
+            return JSONResponse(
+                status_code=413,
+                content={"error": "Image dimensions exceed the configured pixel limit", "faces": []},
             )
 
         try:
             # Unlike the old service, real gallery images require an actual face
             # detection. This prevents DeepFace from embedding the whole image when
             # no face is present.
-            results = DeepFace.represent(
-                img_path=tmp_path,
-                model_name=MODEL_NAME,
-                detector_backend=DETECTOR_BACKEND,
-                enforce_detection=True,
-                align=True,
-            )
+            async with _inference_slots:
+                results = await run_in_threadpool(
+                    lambda: DeepFace.represent(
+                        img_path=tmp_path,
+                        model_name=MODEL_NAME,
+                        detector_backend=DETECTOR_BACKEND,
+                        enforce_detection=True,
+                        align=True,
+                    )
+                )
         except ValueError as exc:
             # DeepFace raises ValueError when no face can be detected. For a gallery
             # index that is a normal result, not a server error.
@@ -444,11 +468,13 @@ async def detect_faces(file: UploadFile = File(...)):
 
         return JSONResponse(content={"faces": faces})
 
+    except ValueError:
+        return JSONResponse(status_code=413, content={"error": "Upload exceeds the configured size limit", "faces": []})
     except Exception as exc:
         print(f"[face-service] Face detection failed for {file.filename}: {exc}", flush=True)
         return JSONResponse(
             status_code=500,
-            content={"error": str(exc), "faces": []},
+            content={"error": "Face inference failed", "faces": []},
         )
     finally:
         _safe_unlink(tmp_path)

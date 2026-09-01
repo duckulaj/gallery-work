@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @Service
@@ -16,7 +17,10 @@ public class NsfwClient {
 
     public NsfwClient(RestClient.Builder builder,
                       @Value("${app.ai.nsfw.service-url:http://localhost:8082}") String baseUrl) {
-        this.rest = builder.baseUrl(baseUrl).build();
+        var requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(java.time.Duration.ofSeconds(5));
+        requestFactory.setReadTimeout(java.time.Duration.ofSeconds(90));
+        this.rest = builder.baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 
     public Result analyse(Path image) {

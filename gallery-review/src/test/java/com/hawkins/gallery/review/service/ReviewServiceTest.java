@@ -38,6 +38,7 @@ class ReviewServiceTest {
         AssetReviewRepository reviews = mock(AssetReviewRepository.class);
         AtomicReference<AssetReview> savedReview = new AtomicReference<>();
         when(assets.findById(asset.getId())).thenReturn(Optional.of(asset));
+        when(assets.save(any(Asset.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(reviews.findById(asset.getId())).thenAnswer(invocation -> Optional.ofNullable(savedReview.get()));
         when(reviews.save(any(AssetReview.class))).thenAnswer(invocation -> {
             AssetReview review = invocation.getArgument(0);

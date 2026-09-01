@@ -12,6 +12,7 @@ import lombok.Setter;
 @Getter @Setter @NoArgsConstructor
 public class ProcessingJob {
     @Id private UUID id;
+    @Version @Column(nullable=false) private long version;
     @Column(name="asset_id", nullable=false, length=64) private String assetId;
     @Enumerated(EnumType.STRING) @Column(name="job_type", nullable=false) private JobType jobType;
     @Enumerated(EnumType.STRING) @Column(nullable=false) private JobStatus status = JobStatus.PENDING;
@@ -22,6 +23,8 @@ public class ProcessingJob {
     private Instant availableAt = Instant.now();
     private Instant startedAt;
     private Instant completedAt;
+    private Instant leaseUntil;
+    @Column(length=128) private String workerId;
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
 

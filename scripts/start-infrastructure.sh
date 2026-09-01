@@ -8,6 +8,11 @@ postgres_port="${POSTGRES_PORT:-5432}"
 postgres_user="${GALLERY_DB_USERNAME:-${POSTGRES_USER:-gallery_user}}"
 postgres_db="${GALLERY_DB_NAME:-${POSTGRES_DB:-gallery_ai}}"
 
+if command -v systemctl >/dev/null 2>&1 && ! systemctl is-active --quiet postgresql; then
+  echo "ERROR: systemd PostgreSQL is not active. Start it with: sudo systemctl start postgresql" >&2
+  exit 1
+fi
+
 if docker inspect gallery-face-service >/dev/null 2>&1; then
   face_state=$(docker inspect --format='{{.State.Status}}' gallery-face-service 2>/dev/null || true)
   if [[ "$face_state" != "running" ]]; then

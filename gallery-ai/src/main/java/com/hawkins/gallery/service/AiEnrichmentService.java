@@ -45,11 +45,10 @@ public class AiEnrichmentService {
     private final EmbeddingService embed;
     private final KnownFaceService knownFaces;
     private final FaceDetectionService faceDetection;
-    private final NsfwClient nsfw;
     private final PlatformTransactionManager transactionManager;
     private final ExecutorService enrichmentExecutor;
     private final ObjectMapper mapper;
-    private final java.util.concurrent.ConcurrentMap<String, CompletableFuture<Void>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentMap<String, CompletableFuture<?>> inFlight = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentMap<String, ActiveProcessState> activeProcesses = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean knownFaceApplicationActive = new AtomicBoolean();
     private final AtomicInteger knownFaceMatches = new AtomicInteger();
@@ -139,12 +138,14 @@ public class AiEnrichmentService {
                     CompletableFuture<EnrichmentIntermediate> f =
                             CompletableFuture.supplyAsync(() -> claimAndAnalyse(id), enrichmentExecutor);
                     // Track in inFlight so cancellation can reach this item
-                    inFlight.put(id, f.thenAccept(r -> {}));
+                    inFlight.put(id, f);
                     return f;
                 })
                 .toList();
 
-        CompletableFuture.allOf(visionFutures.toArray(new CompletableFuture[0])).join();
+        CompletableFuture.allOf(visionFutures.stream()
+                .map(f -> f.exceptionally(error -> null))
+                .toArray(CompletableFuture[]::new)).join();
 
         List<EnrichmentIntermediate> intermediates = visionFutures.stream()
                 .map(f -> f.getNow(null))
@@ -197,6 +198,7 @@ public class AiEnrichmentService {
             updateActiveStage(ir.assetId(), "Persistence");
             CompletableFuture<Void> f = CompletableFuture.runAsync(
                     () -> persistAsset(ir, vector, embedMsPerAsset), enrichmentExecutor);
+            inFlight.put(ir.assetId(), f);
             f.whenComplete((r, t) -> inFlight.remove(ir.assetId()));
             saveFutures.add(f);
         }
@@ -211,7 +213,7 @@ public class AiEnrichmentService {
         String[] keys = inFlight.keySet().toArray(new String[0]);
         int cancelled = 0;
         for (String id : keys) {
-            CompletableFuture<Void> f = inFlight.get(id);
+            CompletableFuture<?> f = inFlight.get(id);
             if (f != null) {
                 boolean c = f.cancel(true);
                 if (c) cancelled++;
@@ -222,11 +224,11 @@ public class AiEnrichmentService {
     }
 
     public AiQueueStats stats() {
-        long pending = metas.countByAiStatus(AiStatus.PENDING.name()) + metas.countByAiStatus(AiStatus.RETRY.name());
-        long processing = metas.countByAiStatus(AiStatus.PROCESSING.name());
-        long complete = metas.countByAiStatus(AiStatus.COMPLETE.name());
-        long failed = metas.countByAiStatus(AiStatus.FAILED.name());
-        long cancelled = metas.countByAiStatus(AiStatus.CANCELLED.name());
+        long pending = metas.countByAiStatus(AiStatus.PENDING) + metas.countByAiStatus(AiStatus.RETRY);
+        long processing = metas.countByAiStatus(AiStatus.PROCESSING);
+        long complete = metas.countByAiStatus(AiStatus.COMPLETE);
+        long failed = metas.countByAiStatus(AiStatus.FAILED);
+        long cancelled = metas.countByAiStatus(AiStatus.CANCELLED);
         return new AiQueueStats(pending, processing, complete, failed, cancelled);
     }
 
@@ -271,16 +273,8 @@ public class AiEnrichmentService {
                     faceDetection.detectAndRecognise(assetId, original);
             sw.stop();
 
-            NsfwClient.Result nsfwResult = null;
-            if (!applyKnownFaces) {
-                updateActiveStage(assetId, "NSFW detection");
-                sw.start("NSFW detection");
-                nsfwResult = nsfw.detect(original);
-                sw.stop();
-            }
-
-                return new EnrichmentIntermediate(
-                    assetId, snapshot, original, exif, aiAnalysis, faceResult, nsfwResult, applyKnownFaces, sw);
+            return new EnrichmentIntermediate(
+                    assetId, snapshot, original, exif, aiAnalysis, faceResult, applyKnownFaces, sw);
         } catch (Exception ex) {
             markFailed(assetId, ex);
             activeProcesses.remove(assetId);
@@ -295,7 +289,7 @@ public class AiEnrichmentService {
                 throw new RuntimeException("Enrichment interrupted");
             }
             AssetMetadata maybe = metas.findById(ir.assetId()).orElse(null);
-            if (maybe != null && AiStatus.CANCELLED.name().equals(maybe.getAiStatus())) {
+            if (maybe != null && maybe.getAiStatus() == AiStatus.CANCELLED) {
                 log.info("Enrichment for asset {} aborted because metadata marked CANCELLED", ir.assetId());
                 return;
             }
@@ -305,7 +299,7 @@ public class AiEnrichmentService {
             tx().executeWithoutResult(status -> {
                 Asset asset = assets.findById(ir.assetId()).orElseThrow();
                 AssetMetadata m = metas.findById(ir.assetId()).orElseGet(AssetMetadata::new);
-                if (AiStatus.CANCELLED.name().equals(m.getAiStatus())) {
+                if (m.getAiStatus() == AiStatus.CANCELLED) {
                     log.info("Not marking asset {} COMPLETE because status is already CANCELLED", ir.assetId());
                     return;
                 }
@@ -332,17 +326,9 @@ public class AiEnrichmentService {
                 m.setFaceDescriptions(ir.aiAnalysis().faceDescriptions());
                 m.setSceneType(ir.aiAnalysis().sceneType());
                 m.setSceneLabels(ir.aiAnalysis().sceneLabels());
-                if (ir.nsfwResult() != null) {
-                    m.setNsfwScore(ir.nsfwResult().score());
-                    m.setNsfwLevel(ir.nsfwResult().level());
-                    m.setNsfwLabels(toJson(ir.nsfwResult().labels()));
-                    if (m.getNsfwReviewStatus() == null || m.getNsfwReviewStatus().isBlank()) {
-                        m.setNsfwReviewStatus("UNREVIEWED");
-                    }
-                }
                 m.setExifJson(toJson(ir.exif()));
                 m.setAiModel(ir.aiAnalysis().model());
-                m.setAiStatus(AiStatus.COMPLETE.name());
+                m.setAiStatus(AiStatus.COMPLETE);
                 m.setAiError(null);
                 m.setAiUpdatedAt(Instant.now());
                 for (org.springframework.util.StopWatch.TaskInfo info : ir.sw().getTaskInfo()) {
@@ -350,7 +336,6 @@ public class AiEnrichmentService {
                         case "EXIF extraction" -> m.setTimingExifMs(info.getTimeMillis());
                         case "AI tagging/vision" -> m.setTimingAiMs(info.getTimeMillis());
                         case "Face detection" -> m.setTimingFaceMs(info.getTimeMillis());
-                        case "NSFW detection" -> m.setTimingNsfwMs(info.getTimeMillis());
                     }
                 }
                 m.setTimingEmbedMs(embedMs);
@@ -359,25 +344,9 @@ public class AiEnrichmentService {
 
                 String model = "ollama:mxbai-embed-large";
                 String vectorJson = embed.toJson(vector);
-                try {
-                    embeddings.upsertVector(
-                            ir.assetId(),
-                            model,
-                            vector.length,
-                            embed.toPgVectorLiteral(vector),
-                            vectorJson);
-                } catch (Exception nativeVectorEx) {
-                    // Compatibility fallback for the pre-pgvector/MySQL schema.
-                    // Remove this branch once the PostgreSQL migration is complete.
-                    log.warn("Native vector upsert failed for asset {}; falling back to embedding_json only: {}",
-                            ir.assetId(), nativeVectorEx.getMessage());
-                    AssetEmbedding e = embeddings.findById(ir.assetId()).orElseGet(AssetEmbedding::new);
-                    e.setAsset(asset);
-                    e.setModel(model);
-                    e.setDimensions(vector.length);
-                    e.setEmbeddingJson(vectorJson);
-                    embeddings.save(e);
-                }
+                embeddings.upsertVector(
+                        ir.assetId(), model, vector.length,
+                        embed.toPgVectorLiteral(vector), vectorJson);
             });
         } catch (Exception ex) {
             markFailed(ir.assetId(), ex);
@@ -404,25 +373,12 @@ public class AiEnrichmentService {
             Map<String, String> exif,
             AiTaggingService.AiImageAnalysis aiAnalysis,
             FaceDetectionService.FaceDetectionSummary faceResult,
-            NsfwClient.Result nsfwResult,
             boolean applyKnownFaces,
             org.springframework.util.StopWatch sw) {}
 
     private boolean claim(String assetId) {
         Boolean claimed = tx().execute(status -> {
-            AssetMetadata m = metas.findById(assetId).orElse(null);
-            if (m == null) {
-                return false;
-            }
-            String current = m.getAiStatus();
-            if (AiStatus.COMPLETE.name().equals(current)) {
-                return false;
-            }
-            m.setAiStatus(AiStatus.PROCESSING.name());
-            m.setAiError(null);
-            m.setAiUpdatedAt(Instant.now());
-            metas.save(m);
-            return true;
+            return metas.claimForAi(assetId) == 1;
         });
         return Boolean.TRUE.equals(claimed);
     }
@@ -442,10 +398,10 @@ public class AiEnrichmentService {
             }
             // If the metadata has already been set to CANCELLED due to a user cancellation,
             // don't overwrite the cancellation message with the exception text.
-            if (AiStatus.CANCELLED.name().equals(m.getAiStatus()) && "Cancelled by user".equals(m.getAiError())) {
+            if (m.getAiStatus() == AiStatus.CANCELLED && "Cancelled by user".equals(m.getAiError())) {
                 return;
             }
-            m.setAiStatus(AiStatus.FAILED.name());
+            m.setAiStatus(AiStatus.FAILED);
             m.setAiError(trim(ex.getMessage(), 1800));
             m.setAiUpdatedAt(Instant.now());
             metas.save(m);

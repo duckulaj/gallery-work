@@ -36,7 +36,4 @@ public interface AssetRepository extends JpaRepository<Asset, String> {
   boolean existsByFolderIdAndChecksum(String folderId, String checksum);
 
   boolean existsByFolderIdAndStoragePath(String folderId, String storagePath);
-  @Query(value = "SELECT a.* FROM assets a JOIN asset_metadata m ON m.asset_id=a.id WHERE m.nsfw_score >= :threshold AND (:status = 'ALL' OR m.nsfw_review_status = :status) ORDER BY m.nsfw_score DESC", nativeQuery = true)
-  List<Asset> findNsfwReview(@Param("threshold") double threshold, @Param("status") String status);
-
 }

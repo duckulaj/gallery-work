@@ -1,22 +1,4 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: gallery-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-gallery_ai}
-      POSTGRES_USER: ${POSTGRES_USER:-gallery_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
-    ports:
-      - "5432:5432"
-    volumes:
-      - gallery-postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gallery_user} -d ${POSTGRES_DB:-gallery_ai}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   face-service:
     build:
       context: ./face-service
@@ -31,7 +13,7 @@ services:
       DEEPFACE_MIN_CONFIDENCE: "0.5"
       AI_REQUIRE_GPU: "true"
     volumes:
-      - deepface-weights:/root/.deepface
+      - deepface-weights:/home/gallery/.deepface
       - ./data/gallery/face-crops:/data/gallery/face-crops
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
@@ -41,5 +23,4 @@ services:
       start_period: 120s
 
 volumes:
-  gallery-postgres-data:
   deepface-weights:

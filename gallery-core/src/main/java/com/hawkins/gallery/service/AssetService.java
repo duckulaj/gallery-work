@@ -28,6 +28,7 @@ import com.hawkins.gallery.domain.Asset;
 import com.hawkins.gallery.domain.AssetMetadata;
 import com.hawkins.gallery.domain.Folder;
 import com.hawkins.gallery.event.AssetIndexedEvent;
+import com.hawkins.gallery.config.AppProperties;
 import com.hawkins.gallery.repository.AssetEmbeddingRepository;
 import com.hawkins.gallery.repository.AssetMetadataRepository;
 import com.hawkins.gallery.repository.AssetRepository;
@@ -45,14 +46,12 @@ public class AssetService {
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff");
 
-    /** Only directories under the user's home may be indexed. */
-    private static final Path USER_HOME = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
-
     private final FolderRepository folders;
     private final AssetRepository assets;
     private final AssetMetadataRepository metas;
     private final AssetEmbeddingRepository embeddings;
     private final ImageService images;
+    private final AppProperties properties;
     private final PlatformTransactionManager transactionManager;
     private final AlbumService albumService;
     private final ApplicationEventPublisher eventPublisher;
@@ -73,12 +72,18 @@ public class AssetService {
 
 
     public DirectoryIndexResult indexDirectory(String folderId, String directoryPath, boolean recursive) {
-        Path root = Path.of(directoryPath).toAbsolutePath().normalize();
+        Path root;
+        try {
+            root = Path.of(directoryPath).toRealPath();
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Directory does not exist", ex);
+        }
         if (!Files.isDirectory(root)) {
             throw new IllegalArgumentException("Directory does not exist: " + root);
         }
-        if (!root.startsWith(USER_HOME)) {
-            throw new IllegalArgumentException("Directory is outside the allowed home directory: " + root);
+        boolean allowed = properties.importRoots().stream().map(this::realRoot).anyMatch(root::startsWith);
+        if (!allowed) {
+            throw new IllegalArgumentException("Directory is outside the configured import roots");
         }
 
         Folder rootAlbum = albumService.resolveRootAlbum(root);
@@ -131,6 +136,14 @@ public class AssetService {
         return new DirectoryIndexResult(root.toString(), indexed, skipped, failed, true, rootAlbum.getId());
     }
 
+    private Path realRoot(Path configured) {
+        try {
+            return configured.toRealPath();
+        } catch (IOException ex) {
+            return configured.toAbsolutePath().normalize();
+        }
+    }
+
     public DirectoryIndexResult reindexAi(String folderId) {
         return queueAiForFolder(folderId, true);
     }
@@ -179,14 +192,14 @@ public class AssetService {
     @Transactional
     public int haltAiProcessing() {
         // Find all metadata rows that are pending, retry or currently processing
-        var statuses = java.util.List.of(AiStatus.PENDING.name(), AiStatus.RETRY.name(), AiStatus.PROCESSING.name());
+        var statuses = java.util.List.of(AiStatus.PENDING, AiStatus.RETRY, AiStatus.PROCESSING);
         var list = metas.findByAiStatusIn(statuses);
         int changed = 0;
         Instant now = Instant.now();
         for (var m : list) {
-            String current = m.getAiStatus();
-            if (AiStatus.PENDING.name().equals(current) || AiStatus.RETRY.name().equals(current) || AiStatus.PROCESSING.name().equals(current)) {
-                m.setAiStatus(AiStatus.CANCELLED.name());
+            AiStatus current = m.getAiStatus();
+            if (current == AiStatus.PENDING || current == AiStatus.RETRY || current == AiStatus.PROCESSING) {
+                m.setAiStatus(AiStatus.CANCELLED);
                 m.setAiError("Cancelled by user");
                 m.setAiUpdatedAt(now);
                 metas.save(m);
@@ -224,13 +237,13 @@ public class AssetService {
         AssetMetadata m = metas.findById(assetId).orElseGet(AssetMetadata::new);
         m.setAsset(asset);
 
-        String currentStatus = m.getAiStatus();
-        boolean isIncomplete = AiStatus.CANCELLED.name().equals(currentStatus) || AiStatus.FAILED.name().equals(currentStatus);
+        AiStatus currentStatus = m.getAiStatus();
+        boolean isIncomplete = currentStatus == AiStatus.CANCELLED || currentStatus == AiStatus.FAILED;
         if (!force && !isIncomplete && hasAiMetadata(m)) {
             return false;
         }
 
-        m.setAiStatus(AiStatus.PENDING.name());
+        m.setAiStatus(AiStatus.PENDING);
         m.setAiError(null);
         m.setAiUpdatedAt(Instant.now());
         metas.save(m);
@@ -419,45 +432,6 @@ public class AssetService {
 
     public List<Folder> findAllFolders() {
         return folders.findAll();
-    }
-
-    @Transactional
-    public void setNsfwReviewStatus(String id, String status) {
-        AssetMetadata m = metas.findById(id).orElseThrow();
-        m.setNsfwReviewStatus(status);
-        m.setNsfwReviewedAt(Instant.now());
-        metas.save(m);
-    }
-
-    @Transactional
-    public void moveToQuarantine(String id, Path quarantineDir) throws IOException {
-        Asset asset = assets.findById(id).orElseThrow();
-        Path source = Path.of(asset.getStoragePath()).toAbsolutePath().normalize();
-        Files.createDirectories(quarantineDir);
-        Path dest = uniqueQuarantineDest(quarantineDir, asset.getFilename());
-        try {
-            Files.move(source, dest, StandardCopyOption.ATOMIC_MOVE);
-        } catch (java.nio.file.FileSystemException ex) {
-            Files.move(source, dest, StandardCopyOption.REPLACE_EXISTING);
-        }
-        asset.setStoragePath(dest.toString());
-        assets.save(asset);
-        AssetMetadata m = metas.findById(id).orElseThrow();
-        m.setNsfwReviewStatus("QUARANTINED");
-        m.setNsfwReviewedAt(Instant.now());
-        metas.save(m);
-    }
-
-    private Path uniqueQuarantineDest(Path dir, String filename) {
-        Path candidate = dir.resolve(filename);
-        if (!Files.exists(candidate)) return candidate;
-        int dot = filename.lastIndexOf('.');
-        String base = dot > 0 ? filename.substring(0, dot) : filename;
-        String ext = dot > 0 ? filename.substring(dot) : "";
-        for (int i = 1; ; i++) {
-            candidate = dir.resolve(base + "-" + i + ext);
-            if (!Files.exists(candidate)) return candidate;
-        }
     }
 
     public record DirectoryIndexResult(String directory, int indexed, int skipped, int failed, boolean aiQueued, String rootAlbumId) {

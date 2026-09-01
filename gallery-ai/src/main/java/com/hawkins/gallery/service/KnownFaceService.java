@@ -85,7 +85,7 @@ public class KnownFaceService {
         AssetMetadata meta = metas.findById(assetId).orElse(null);
         if (meta != null) {
             meta.setFaceNames(mergeJsonList(meta.getFaceNames(), cleanName));
-            meta.setAiStatus(AiStatus.PENDING.name());
+            meta.setAiStatus(AiStatus.PENDING);
             meta.setAiError(null);
             meta.setAiUpdatedAt(Instant.now());
             metas.save(meta);

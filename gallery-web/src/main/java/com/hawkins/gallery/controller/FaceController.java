@@ -17,10 +17,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.hawkins.gallery.repository.FaceDetectionRepository;
 import com.hawkins.gallery.service.AssetService;
 import com.hawkins.gallery.service.FaceDetectionService;
 import com.hawkins.gallery.service.KnownFaceService;
+import com.hawkins.gallery.service.FileAccessPolicy;
 
 import lombok.RequiredArgsConstructor;
 
@@ -32,8 +32,8 @@ public class FaceController {
 
     private final AssetService assetService;
     private final FaceDetectionService faceDetectionService;
-    private final FaceDetectionRepository faceDetectionRepo;
     private final KnownFaceService knownFaces;
+    private final FileAccessPolicy fileAccessPolicy;
 
     /**
      * Workspace view filtered to assets with unidentified faces.
@@ -41,7 +41,7 @@ public class FaceController {
      */
     @GetMapping("/faces/unidentified")
     public String unidentifiedFaces(Model model) {
-        List<String> assetIds = faceDetectionRepo.findAssetIdsWithUnidentifiedFaces();
+        List<String> assetIds = List.copyOf(faceDetectionService.getUnidentifiedFaceAssetIds());
         var assets = assetService.findAllById(assetIds);
         model.addAttribute("assets", assets);
         model.addAttribute("unidentifiedFaceAssets", faceDetectionService.getUnidentifiedFaceAssetIds());
@@ -92,13 +92,15 @@ public class FaceController {
      */
     @GetMapping("/faces/crops/{detectionId}")
     public ResponseEntity<Resource> crop(@PathVariable String detectionId) throws IOException {
-        var fd = faceDetectionRepo.findById(detectionId)
+        var fd = faceDetectionService.findDetection(detectionId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         if (fd.getCropPath() == null) {
             throw new ResponseStatusException(NOT_FOUND, "No crop available");
         }
-        Path cropPath = Path.of(fd.getCropPath()).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(cropPath)) {
+        Path cropPath;
+        try {
+            cropPath = fileAccessPolicy.requireReadableFile(fd.getCropPath());
+        } catch (IOException ex) {
             throw new ResponseStatusException(NOT_FOUND, "Crop file not found");
         }
         return ResponseEntity.ok()

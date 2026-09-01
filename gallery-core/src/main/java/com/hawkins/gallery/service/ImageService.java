@@ -32,8 +32,8 @@ public class ImageService {
     }
 
     public void ensureDirs() throws IOException {
-        Files.createDirectories(Path.of(props.storageRoot(), "originals"));
-        Files.createDirectories(Path.of(props.storageRoot(), "thumbs"));
+        Files.createDirectories(props.storageRoot().resolve("originals"));
+        Files.createDirectories(props.storageRoot().resolve("thumbs"));
     }
 
     public String sha256(Path p) {
@@ -61,7 +61,7 @@ public class ImageService {
 
     public Path thumbnail(Path original, String id) throws IOException {
         ensureDirs();
-        Path out = Path.of(props.storageRoot(), "thumbs", id + ".jpg");
+        Path out = props.storageRoot().resolve("thumbs").resolve(id + ".jpg");
         Thumbnails.of(original.toFile())
                 .size(props.thumbnailSize(), props.thumbnailSize())
                 .keepAspectRatio(true)

@@ -14,6 +14,8 @@ import jakarta.persistence.MapsId;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -55,7 +57,8 @@ public class AssetMetadata {
     @Column(name = "scene_labels")
     private String sceneLabels;
     @Column(name = "ai_status", length = 24)
-    private String aiStatus;
+    @Enumerated(EnumType.STRING)
+    private AiStatus aiStatus;
     @Column(name = "ai_model")
     private String aiModel;
     @JdbcTypeCode(SqlTypes.LONGVARCHAR)
@@ -73,19 +76,8 @@ public class AssetMetadata {
     private Long timingEmbedMs;
     @Column(name = "timing_total_ms")
     private Long timingTotalMs;
-    @Column(name = "nsfw_score")
-    private Double nsfwScore;
-    @Column(name = "nsfw_level", length = 24)
-    private String nsfwLevel = "UNKNOWN";
-    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
-    @Column(name = "nsfw_labels")
-    private String nsfwLabels;
-    @Column(name = "nsfw_review_status", length = 24)
-    private String nsfwReviewStatus = "UNREVIEWED";
-    @Column(name = "nsfw_reviewed_at")
-    private Instant nsfwReviewedAt;
-    @Column(name = "timing_nsfw_ms")
-    private Long timingNsfwMs;
+    @Column(name = "known_face_version", nullable = false)
+    private long knownFaceVersion;
     @OneToOne(fetch = FetchType.LAZY)
     @MapsId
     @JoinColumn(name = "asset_id")
@@ -109,4 +101,3 @@ public class AssetMetadata {
         return json.replaceAll("[\\[\\]\"]", "").replace(",", ", ").trim();
     }
 }
-

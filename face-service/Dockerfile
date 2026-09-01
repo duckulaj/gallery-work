@@ -31,9 +31,12 @@ RUN python -m pip install --no-cache-dir --ignore-installed blinker && \
 
 COPY main.py .
 
-# DeepFace model weights are downloaded on first use and cached in
-# /root/.deepface. Mount a named volume there so they survive rebuilds.
-VOLUME ["/root/.deepface"]
+RUN useradd --create-home --uid 10001 gallery && chown -R gallery:gallery /app
+USER gallery
+
+# DeepFace model weights are downloaded on first use and cached in the service
+# account's home directory. Mount a named volume here for persistence.
+VOLUME ["/home/gallery/.deepface"]
 
 EXPOSE 8082
 

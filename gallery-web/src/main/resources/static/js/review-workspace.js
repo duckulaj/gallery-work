@@ -5,7 +5,7 @@ const Review=(()=>{let selected=new Set(),timer,poll;
  function query(){return new URLSearchParams({filter:document.getElementById('filter').value,threshold:(Number(document.getElementById('threshold').value)/100).toFixed(2),q:document.getElementById('search').value})}
  async function reload(){selected.clear();const r=await fetch('/review/grid?'+query());const html=await r.text();const d=new DOMParser().parseFromString(html,'text/html');document.getElementById('workspace').replaceWith(d.getElementById('workspace'));startPolling()}
  function debounceReload(){clearTimeout(timer);timer=setTimeout(reload,300)}
- async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
+ async function post(url,body){const token=document.querySelector('meta[name="_csrf"]')?.content,header=document.querySelector('meta[name="_csrf_header"]')?.content;const headers={'Content-Type':'application/json'};if(token&&header)headers[header]=token;const r=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
  function requireSelection(){if(!selected.size){toast('Select one or more photos first');return false}return true}
  async function setStatus(status){if(!requireSelection())return;await post('/review/status',{ids:ids(),status});toast(`${selected.size} photo(s) updated`);reload()}
  async function queue(force){const chosen=ids();await post('/review/queue',{ids:chosen,force});toast('NSFW scan queued');startPolling()}

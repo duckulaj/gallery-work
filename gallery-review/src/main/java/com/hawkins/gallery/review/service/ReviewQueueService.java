@@ -2,7 +2,7 @@ package com.hawkins.gallery.review.service;
 
 import java.time.Instant;
 import java.util.*;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.hawkins.gallery.review.domain.*;
@@ -11,13 +11,20 @@ import com.hawkins.gallery.review.repository.*;
 @Service
 public class ReviewQueueService {
     private final ProcessingJobRepository jobs;
+    private final String workerId = UUID.randomUUID().toString();
+    private final long leaseSeconds;
 
-    public ReviewQueueService(ProcessingJobRepository jobs) { this.jobs = jobs; }
+    public ReviewQueueService(ProcessingJobRepository jobs,
+            @Value("${app.jobs.lease-seconds:300}") long leaseSeconds) {
+        this.jobs = jobs;
+        this.leaseSeconds = Math.max(30, leaseSeconds);
+    }
 
     @Transactional
     public void enqueue(String assetId, JobType type, int priority, boolean force) {
         ProcessingJob job = jobs.findByAssetIdAndJobType(assetId, type).orElseGet(ProcessingJob::new);
-        if (!force && job.getId() != null && job.getStatus() == JobStatus.COMPLETED) return;
+        if (!force && job.getId() != null
+                && (job.getStatus() == JobStatus.COMPLETED || job.getStatus() == JobStatus.RUNNING)) return;
         job.setAssetId(assetId);
         job.setJobType(type);
         job.setPriority(priority);
@@ -27,31 +34,39 @@ public class ReviewQueueService {
         job.setAvailableAt(Instant.now());
         job.setStartedAt(null);
         job.setCompletedAt(null);
+        job.setLeaseUntil(null);
+        job.setWorkerId(null);
         jobs.save(job);
     }
 
     @Transactional
     public Optional<ProcessingJob> claimNext(JobType type) {
-        List<ProcessingJob> found = jobs.next(type, Instant.now(), PageRequest.of(0, 1));
+        Instant now = Instant.now();
+        Optional<ProcessingJob> found = jobs.lockNext(type.name(), now);
         if (found.isEmpty()) return Optional.empty();
-        ProcessingJob job = found.getFirst();
+        ProcessingJob job = found.get();
         job.setStatus(JobStatus.RUNNING);
         job.setAttempts(job.getAttempts() + 1);
-        job.setStartedAt(Instant.now());
+        job.setStartedAt(now);
+        job.setWorkerId(workerId);
+        job.setLeaseUntil(now.plusSeconds(leaseSeconds));
         return Optional.of(jobs.save(job));
     }
 
     @Transactional
-    public void complete(UUID id) {
-        jobs.findById(id).ifPresent(j -> {
-            j.setStatus(JobStatus.COMPLETED); j.setCompletedAt(Instant.now()); j.setLastError(null); jobs.save(j);
-        });
+    public void complete(UUID id, String owner) {
+        if (jobs.completeOwned(id, owner, JobStatus.COMPLETED, Instant.now()) != 1) {
+            throw new IllegalStateException("Job lease is no longer owned by this worker: " + id);
+        }
     }
 
     @Transactional
-    public void fail(UUID id, Throwable error) {
+    public void fail(UUID id, String owner, Throwable error) {
         jobs.findById(id).ifPresent(j -> {
+            if (j.getStatus() != JobStatus.RUNNING || !Objects.equals(owner, j.getWorkerId())) return;
             j.setLastError(trim(error.getMessage()));
+            j.setWorkerId(null);
+            j.setLeaseUntil(null);
             if (j.getAttempts() >= j.getMaxAttempts()) {
                 j.setStatus(JobStatus.FAILED);
             } else {

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.hawkins.gallery.domain.AssetMetadata;
+import com.hawkins.gallery.domain.AiStatus;
 
 public interface AssetMetadataRepository extends JpaRepository<AssetMetadata, String> {
     /**
@@ -28,9 +29,21 @@ public interface AssetMetadataRepository extends JpaRepository<AssetMetadata, St
             """, nativeQuery = true)
     List<String> findNextAiQueueBatch(@Param("limit") int limit);
 
-    long countByAiStatus(String aiStatus);
+    /** Atomically claims an eligible row so concurrent schedulers cannot process it twice. */
+    @Modifying
+    @Query(value = """
+            UPDATE asset_metadata
+               SET ai_status = 'PROCESSING', ai_error = NULL, ai_updated_at = NOW()
+             WHERE asset_id = :assetId
+               AND (ai_status IN ('PENDING', 'RETRY')
+                    OR (ai_status = 'PROCESSING'
+                        AND ai_updated_at < NOW() - INTERVAL '30 minutes'))
+            """, nativeQuery = true)
+    int claimForAi(@Param("assetId") String assetId);
 
-    java.util.List<com.hawkins.gallery.domain.AssetMetadata> findByAiStatusIn(java.util.List<String> statuses);
+    long countByAiStatus(AiStatus aiStatus);
+
+    java.util.List<com.hawkins.gallery.domain.AssetMetadata> findByAiStatusIn(java.util.List<AiStatus> statuses);
 
     /**
      * Resets rows interrupted by a JVM shutdown: PROCESSING → FAILED.

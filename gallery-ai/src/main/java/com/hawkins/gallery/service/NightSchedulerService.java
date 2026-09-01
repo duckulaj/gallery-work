@@ -31,15 +31,12 @@ public class NightSchedulerService {
      * Runs "Queue Missing AI" (new/failed images) then "Apply Known Faces"
      * (re-queues completed images with current face-label knowledge).
      */
-    @Scheduled(cron = "0 0 2 * * *")
+    @Scheduled(cron = "0 0 2 * * *", zone = "${app.ai.schedule-zone:Europe/London}")
     public void startNightProcessing() {
         log.info("Night AI window opening at 02:00");
 
         int missing = assets.queueMissingAiGlobal();
         log.info("Night scheduler: queued {} asset(s) missing AI metadata", missing);
-
-        int faces = assets.applyKnownFacesGlobal();
-        log.info("Night scheduler: queued {} asset(s) for known-face application", faces);
 
         aiEnrichment.activateQueue();
     }
@@ -49,7 +46,7 @@ public class NightSchedulerService {
      * Cancels remaining pending and in-flight jobs so they are re-queued
      * (as CANCELLED) and eligible for the next scheduled run.
      */
-    @Scheduled(cron = "0 0 6 * * *")
+    @Scheduled(cron = "0 0 6 * * *", zone = "${app.ai.schedule-zone:Europe/London}")
     public void endNightProcessing() {
         log.info("Night AI window closing at 06:00 — cancelling remaining jobs");
 

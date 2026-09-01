@@ -28,7 +28,8 @@ Install:
 - Java 21
 - Maven 3.8.7 or later
 - VS Code with the recommended extensions when prompted
-- Docker with Docker Compose
+- PostgreSQL 16 managed by systemd, with the pgvector extension installed
+- Docker with Docker Compose (only for the Python face/NSFW service)
 - Ollama
 
 Pull the local AI models once:
@@ -54,9 +55,9 @@ ollama serve
 5. Select **Run Complete Gallery App**.
 6. Press **F5**.
 
-The VS Code profile runs `scripts/start-infrastructure.sh` first. That starts:
+The VS Code profile runs `scripts/start-infrastructure.sh` first. It verifies:
 
-- PostgreSQL 16 with pgvector on port `5432`
+- the systemd-managed PostgreSQL cluster with pgvector is ready on port `5432`
 - The Python face/NSFW service on port `8082`
 
 It then launches `com.hawkins.gallery.GalleryApplication`. Flyway creates the complete fresh schema automatically.
@@ -92,20 +93,21 @@ java -jar gallery-app/target/gallery-app-1.0.0-SNAPSHOT.jar
 
 ## Fresh database warning
 
-Flyway contains one baseline migration:
+Flyway migrations are stored in:
 
 ```text
-gallery-app/src/main/resources/db/migration/V1__initialise_gallery_database.sql
+gallery-app/src/main/resources/db/migration/
 ```
 
-It is intended for a new database. The included PostgreSQL Docker volume is new on first start. To deliberately destroy and recreate the development database:
+PostgreSQL is not run by Docker. Create the local database and enable pgvector as a PostgreSQL administrator before the first application start:
 
 ```bash
-docker compose down -v
-docker compose up -d postgres
+sudo systemctl start postgresql
+sudo -u postgres createdb gallery_ai
+sudo -u postgres psql -d gallery_ai -c 'CREATE EXTENSION IF NOT EXISTS vector'
 ```
 
-That command deletes all gallery database data stored in the Docker volume.
+Do not recreate an existing database: Flyway applies outstanding migrations when the application starts.
 
 ## Configuration
 

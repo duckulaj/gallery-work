@@ -1,7 +1,9 @@
 package com.hawkins.gallery.config;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hc.client5.http.config.ConnectionConfig;
@@ -109,24 +111,6 @@ public class AppConfig {
     }
 
     @Bean
-    com.hawkins.gallery.service.NsfwClient enrichmentNsfwClient(
-            AppProperties props,
-            ObjectMapper objectMapper) {
-        var cm = new org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager();
-        cm.setMaxTotal(4);
-        cm.setDefaultMaxPerRoute(4);
-        var rc = org.apache.hc.client5.http.config.RequestConfig.custom()
-                .setResponseTimeout(org.apache.hc.core5.util.Timeout.ofSeconds(90)).build();
-        var http = org.apache.hc.client5.http.impl.classic.HttpClients.custom()
-                .setConnectionManager(cm).setDefaultRequestConfig(rc).build();
-        RestClient client = RestClient.builder()
-                .baseUrl(props.ai().nsfw().serviceUrl())
-                .requestFactory(new org.springframework.http.client.HttpComponentsClientHttpRequestFactory(http))
-                .build();
-        return new com.hawkins.gallery.service.NsfwClient(client, objectMapper, props.ai().nsfw().enabled());
-    }
-
-    @Bean
     ObjectMapper objectMapper() {
         return new ObjectMapper().findAndRegisterModules();
     }
@@ -137,13 +121,15 @@ public class AppConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
-    ExecutorService enrichmentExecutor(@Value("${app.ai.background.embedding-threads:2}") int threads) {
+    ExecutorService enrichmentExecutor(
+            @Value("${app.ai.background.embedding-threads:2}") int threads,
+            @Value("${app.ai.background.executor-queue-capacity:32}") int queueCapacity) {
         AtomicInteger counter = new AtomicInteger();
-        return Executors.newFixedThreadPool(threads, r -> {
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(Math.max(1, queueCapacity)), r -> {
             Thread t = new Thread(r, "enrichment-" + counter.getAndIncrement());
-            t.setDaemon(true);
+            t.setDaemon(false);
             return t;
-        });
+        }, new ThreadPoolExecutor.CallerRunsPolicy());
     }
 }
-

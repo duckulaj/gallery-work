@@ -183,6 +183,10 @@ public class FaceDetectionService {
         return detections.findByAssetIdOrderByCreatedAtAsc(assetId);
     }
 
+    public java.util.Optional<FaceDetection> findDetection(String detectionId) {
+        return detections.findById(detectionId);
+    }
+
     /** Returns the set of asset IDs that have at least one unidentified face. */
     public Set<String> getUnidentifiedFaceAssetIds() {
         return Set.copyOf(detections.findAssetIdsWithUnidentifiedFaces());
@@ -199,7 +203,7 @@ public class FaceDetectionService {
             return null;
         }
         try {
-            Path dir = Path.of(props.ai().faceRecognition().faceCropsDir()).toAbsolutePath().normalize();
+            Path dir = props.ai().faceRecognition().faceCropsDir().toAbsolutePath().normalize();
             Files.createDirectories(dir);
             Path file = dir.resolve(assetId + "-" + index + ".jpg");
             Files.write(file, jpegBytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);

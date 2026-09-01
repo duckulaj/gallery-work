@@ -14,6 +14,10 @@ public class AssetReview {
     @Column(name = "asset_id", length = 64)
     private String assetId;
 
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     @Column(name = "nsfw_score")
     private Double nsfwScore;
 
@@ -39,6 +43,13 @@ public class AssetReview {
 
     @Column(name = "quarantine_path", columnDefinition = "text")
     private String quarantinePath;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "operation_status", nullable = false)
+    private FileOperationStatus operationStatus = FileOperationStatus.NONE;
+
+    @Column(name = "operation_error", columnDefinition = "text")
+    private String operationError;
 
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;

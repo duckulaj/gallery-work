@@ -3,6 +3,8 @@ package com.hawkins.gallery.service;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,14 +33,20 @@ public class AlbumService {
      */
     @Transactional(readOnly = true)
     public List<AlbumTreeNode> buildTree(String activeFolderId) {
-        return folders.findByParentIsNullOrderByName().stream()
-                .map(root -> buildNode(root, activeFolderId))
+        List<Folder> all = folders.findAll();
+        Map<String, List<Folder>> children = all.stream()
+                .filter(folder -> folder.getParent() != null)
+                .collect(Collectors.groupingBy(folder -> folder.getParent().getId()));
+        return all.stream().filter(folder -> folder.getParent() == null)
+                .sorted(java.util.Comparator.comparing(Folder::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(root -> buildNode(root, activeFolderId, children))
                 .toList();
     }
 
-    private AlbumTreeNode buildNode(Folder folder, String activeFolderId) {
-        List<AlbumTreeNode> children = folders.findByParentOrderByName(folder).stream()
-                .map(c -> buildNode(c, activeFolderId))
+    private AlbumTreeNode buildNode(Folder folder, String activeFolderId, Map<String, List<Folder>> childrenByParent) {
+        List<AlbumTreeNode> children = childrenByParent.getOrDefault(folder.getId(), List.of()).stream()
+                .sorted(java.util.Comparator.comparing(Folder::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(c -> buildNode(c, activeFolderId, childrenByParent))
                 .toList();
         boolean isActive = folder.getId().equals(activeFolderId);
         boolean containsActive = isActive || children.stream().anyMatch(AlbumTreeNode::containsActive);

@@ -11,7 +11,7 @@ spring:
     enabled: true
     validate-on-migrate: false
   thymeleaf:
-    cache: false
+    cache: true
   cache:
     type: caffeine
     cache-names: query-expansions,embeddings
@@ -35,7 +35,12 @@ spring:
       embedding:
         model: mxbai-embed-large
 app:
-  storage-root: ~/Gallery-App/data/gallery
+  security:
+    admin-username: ${GALLERY_ADMIN_USERNAME:gallery}
+    admin-password: ${GALLERY_ADMIN_PASSWORD:}
+  storage-root: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery
+  import-roots:
+    - ${GALLERY_IMPORT_ROOT:${user.home}}
   thumbnail-size: 420
   semantic-candidate-limit: 5000
   ai:
@@ -61,16 +66,18 @@ app:
       enabled: true
       service-url: ${FACE_SERVICE_URL:http://localhost:8082}
       threshold: 0.40
-      face-crops-dir: ~/Gallery-App/data/gallery/face-crops
+      face-crops-dir: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery/face-crops
     nsfw:
       enabled: true
       fixed-delay-ms: 1200
       service-url: ${NSFW_SERVICE_URL:http://localhost:8082}
       review-threshold: 0.20
       explicit-threshold: 0.55
-      quarantine-dir: ~/Gallery-App/data/gallery-quarantine
+      quarantine-dir: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery-quarantine
   review:
-    quarantine-root: ~/Gallery-App/data/gallery/quarantine
+    quarantine-root: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery/quarantine
+server:
+  address: ${GALLERY_BIND_ADDRESS:127.0.0.1}
 management:
   endpoints:
     web:
@@ -79,3 +86,10 @@ management:
   metrics:
     tags:
       application: gallery-app
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  thymeleaf:
+    cache: false
