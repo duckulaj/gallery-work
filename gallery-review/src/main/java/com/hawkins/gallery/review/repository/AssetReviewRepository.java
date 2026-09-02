@@ -16,6 +16,18 @@ public interface AssetReviewRepository extends JpaRepository<AssetReview, String
     long countByReviewStatus(ReviewStatus status);
     long countByNsfwLevel(NsfwLevel level);
 
+    @Query(value = """
+        select exists (
+            select 1
+              from asset_review
+             where asset_id = :assetId
+               and analysed_at is not null
+               and nsfw_level <> 'UNKNOWN'
+               and (error_message is null or error_message = '')
+        )
+        """, nativeQuery = true)
+    boolean hasDetectorResult(@Param("assetId") String assetId);
+
     @Modifying
     @Query(value = """
         insert into asset_review(asset_id, review_status, manual_override, reviewed_at, updated_at,

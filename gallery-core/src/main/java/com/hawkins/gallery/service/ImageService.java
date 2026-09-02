@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import com.drew.imaging.ImageMetadataReader;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.Tag;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.hawkins.gallery.config.AppProperties;
 
 import lombok.extern.slf4j.Slf4j;
@@ -26,9 +28,14 @@ import net.coobird.thumbnailator.Thumbnails;
 @Service
 public class ImageService {
     private final AppProperties props;
+    private final Cache<AiResizeKey, byte[]> aiResizeCache;
 
     public ImageService(AppProperties props) {
         this.props = props;
+        this.aiResizeCache = Caffeine.newBuilder()
+                .maximumSize(props.ai().background().aiResizeCacheEntries())
+                .recordStats()
+                .build();
     }
 
     public void ensureDirs() throws IOException {
@@ -91,8 +98,23 @@ public class ImageService {
     public record PreparedImage(int width, int height, Path thumbnail) { }
 
     public byte[] resizeForAi(Path original) throws IOException {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         int size = props.ai().vision().resizeSize();
+        AiResizeKey key = AiResizeKey.of(original, size);
+        try {
+            return aiResizeCache.get(key, ignored -> {
+                try {
+                    return resizeForAiUncached(original, size);
+                } catch (IOException e) {
+                    throw new ResizeUncheckedException(e);
+                }
+            });
+        } catch (ResizeUncheckedException e) {
+            throw e.ioException;
+        }
+    }
+
+    private byte[] resizeForAiUncached(Path original, int size) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         Thumbnails.of(original.toFile())
                 .size(size, size)
                 .outputFormat("jpg")
@@ -117,5 +139,21 @@ public class ImageService {
 
     static String sanitiseExifText(String value) {
         return value == null ? null : value.replace("\u0000", "");
+    }
+
+    private record AiResizeKey(Path path, long modifiedAtMillis, long sizeBytes, int resizeSize) {
+        static AiResizeKey of(Path original, int resizeSize) throws IOException {
+            Path path = original.toAbsolutePath().normalize();
+            return new AiResizeKey(path, Files.getLastModifiedTime(path).toMillis(), Files.size(path), resizeSize);
+        }
+    }
+
+    private static class ResizeUncheckedException extends RuntimeException {
+        private final IOException ioException;
+
+        private ResizeUncheckedException(IOException ioException) {
+            super(ioException);
+            this.ioException = ioException;
+        }
     }
 }

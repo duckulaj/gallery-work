@@ -11,6 +11,7 @@ import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StopWatch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hawkins.gallery.config.AppProperties;
@@ -78,17 +79,24 @@ public class FaceDetectionService {
             return new FaceDetectionSummary(0, 0, List.of());
         }
 
-        // Remove stale detections from a prior enrichment run.
-        detections.deleteByAssetId(assetId);
+        StopWatch sw = new StopWatch("Face detection for asset " + assetId);
 
+        sw.start("Delete stale detections");
+        detections.deleteByAssetId(assetId);
+        sw.stop();
+
+        sw.start("DeepFace detection");
         List<DeepFaceClient.DetectedFace> faces = deepFaceClient.detect(imagePath);
+        sw.stop();
         if (faces.isEmpty()) {
+            log.info("{} | stages: {}", sw.shortSummary(), stageBreakdown(sw));
             return new FaceDetectionSummary(0, 0, List.of());
         }
 
         List<String> recognisedNames = new ArrayList<>();
         double threshold = props.ai().faceRecognition().threshold();
 
+        sw.start("Match and persist faces");
         for (int i = 0; i < faces.size(); i++) {
             DeepFaceClient.DetectedFace face = faces.get(i);
 
@@ -127,9 +135,10 @@ public class FaceDetectionService {
             fd.setCropPath(cropPath);
             detections.save(fd);
         }
+        sw.stop();
 
-        log.info("Face detection for asset {}: {} face(s), {} recognised",
-                assetId, faces.size(), recognisedNames.size());
+        log.info("{} | stages: {} | faces: {} | recognised: {}",
+                sw.shortSummary(), stageBreakdown(sw), faces.size(), recognisedNames.size());
         return new FaceDetectionSummary(
             faces.size(), recognisedNames.size(), recognisedNames.stream().distinct().toList());
     }
@@ -212,5 +221,11 @@ public class FaceDetectionService {
             log.warn("Could not save face crop for asset {}: {}", assetId, ex.getMessage());
             return null;
         }
+    }
+
+    private String stageBreakdown(StopWatch sw) {
+        return java.util.Arrays.stream(sw.getTaskInfo())
+                .map(info -> info.getTaskName() + "=" + info.getTimeMillis() + "ms")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 }

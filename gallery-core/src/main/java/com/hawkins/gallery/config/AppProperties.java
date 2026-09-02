@@ -53,8 +53,10 @@ public record AppProperties(
             @Min(1) Integer maxInFlight,
             @Min(1) Integer batchSize,
             @Min(100) int fixedDelayMs,
+            @Min(1) Integer workerThreads,
             @Min(1) int embeddingThreads,
-            @Min(1) int connectionPoolSize) {
+            @Min(1) int connectionPoolSize,
+            @Min(1) int aiResizeCacheEntries) {
         public int effectiveMaxInFlight() {
             if (maxInFlight != null) {
                 return maxInFlight;
@@ -62,19 +64,26 @@ public record AppProperties(
             return batchSize != null ? batchSize : 6;
         }
 
+        public int effectiveWorkerThreads() {
+            return workerThreads != null ? workerThreads : embeddingThreads;
+        }
+
         static Background defaults() {
-            return new Background(true, 6, null, 4000, 4, 6);
+            return new Background(true, 6, null, 4000, 6, 4, 8, 512);
         }
     }
 
     public record Nsfw(
             boolean enabled,
+            @Min(100) int fixedDelayMs,
+            @Min(1) int batchSize,
+            @Min(1) int workerThreads,
             @NotBlank String serviceUrl,
             @DecimalMin("0.0") @DecimalMax("1.0") double reviewThreshold,
             @DecimalMin("0.0") @DecimalMax("1.0") double explicitThreshold,
             @NotNull Path quarantineDir) {
         static Nsfw defaults() {
-            return new Nsfw(true, "http://localhost:8082", 0.55, 0.85,
+            return new Nsfw(true, 250, 16, 4, "http://localhost:8082", 0.55, 0.85,
                     Path.of("data/gallery-quarantine").toAbsolutePath().normalize());
         }
     }

@@ -54,6 +54,27 @@ public class ReviewQueueService {
     }
 
     @Transactional
+    public List<ProcessingJob> claimNextBatch(JobType type, int limit) {
+        int safeLimit = Math.max(1, limit);
+        List<ProcessingJob> claimed = new ArrayList<>(safeLimit);
+        Instant now = Instant.now();
+        for (int i = 0; i < safeLimit; i++) {
+            Optional<ProcessingJob> found = jobs.lockNext(type.name(), now);
+            if (found.isEmpty()) {
+                break;
+            }
+            ProcessingJob job = found.get();
+            job.setStatus(JobStatus.RUNNING);
+            job.setAttempts(job.getAttempts() + 1);
+            job.setStartedAt(now);
+            job.setWorkerId(workerId);
+            job.setLeaseUntil(now.plusSeconds(leaseSeconds));
+            claimed.add(jobs.save(job));
+        }
+        return claimed;
+    }
+
+    @Transactional
     public void complete(UUID id, String owner) {
         if (jobs.completeOwned(id, owner, JobStatus.COMPLETED, Instant.now()) != 1) {
             throw new IllegalStateException("Job lease is no longer owned by this worker: " + id);

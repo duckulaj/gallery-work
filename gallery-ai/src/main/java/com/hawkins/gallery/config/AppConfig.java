@@ -85,10 +85,11 @@ public class AppConfig {
     com.hawkins.gallery.service.DeepFaceClient deepFaceClient(
             AppProperties props,
             ObjectMapper objectMapper) {
+        int poolSize = props.ai().background().connectionPoolSize();
         org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager cm =
                 new org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager();
-        cm.setMaxTotal(4);
-        cm.setDefaultMaxPerRoute(4);
+        cm.setMaxTotal(poolSize);
+        cm.setDefaultMaxPerRoute(poolSize);
         cm.setDefaultConnectionConfig(
                 org.apache.hc.client5.http.config.ConnectionConfig.custom()
                         .setConnectTimeout(org.apache.hc.core5.util.Timeout.ofSeconds(5))
@@ -122,7 +123,7 @@ public class AppConfig {
 
     @Bean(destroyMethod = "shutdown")
     ExecutorService enrichmentExecutor(
-            @Value("${app.ai.background.embedding-threads:2}") int threads,
+            @Value("${app.ai.background.worker-threads:${app.ai.background.embedding-threads:4}}") int threads,
             @Value("${app.ai.background.executor-queue-capacity:32}") int queueCapacity) {
         AtomicInteger counter = new AtomicInteger();
         return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,

@@ -5,6 +5,7 @@
 <dependency><groupId>org.springframework</groupId><artifactId>spring-tx</artifactId></dependency>
 <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
 <dependency><groupId>net.coobird</groupId><artifactId>thumbnailator</artifactId><version>${thumbnailator.version}</version></dependency>
+<dependency><groupId>com.github.ben-manes.caffeine</groupId><artifactId>caffeine</artifactId></dependency>
 <dependency><groupId>com.drewnoakes</groupId><artifactId>metadata-extractor</artifactId><version>${metadata-extractor.version}</version></dependency>
 <dependency><groupId>com.twelvemonkeys.imageio</groupId><artifactId>imageio-webp</artifactId><version>${twelvemonkeys.version}</version></dependency>
 <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>

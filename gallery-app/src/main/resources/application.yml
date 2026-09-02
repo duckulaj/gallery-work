@@ -54,14 +54,16 @@ app:
       enabled: true
       max-in-flight: 6
       fixed-delay-ms: 4000
+      worker-threads: 6
       embedding-threads: 4
-      connection-pool-size: 6
+      connection-pool-size: 8
+      ai-resize-cache-entries: 512
     vision:
       enabled: true
       model: minicpm-v4.6
       temperature: 0.0
-      num-predict: 768
-      resize-size: 896
+      num-predict: 512
+      resize-size: 768
       num-ctx: 4096
       top-k: 40
       top-p: 0.9
@@ -75,7 +77,9 @@ app:
       face-crops-dir: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery/face-crops
     nsfw:
       enabled: true
-      fixed-delay-ms: 1200
+      fixed-delay-ms: 250
+      batch-size: 16
+      worker-threads: 4
       service-url: ${NSFW_SERVICE_URL:http://localhost:8082}
       review-threshold: 0.20
       explicit-threshold: 0.55

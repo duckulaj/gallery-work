@@ -81,7 +81,7 @@ public class OllamaVisionService {
                             .validateSchema());
             sw.stop();
 
-            log.info("{}", sw.shortSummary());
+            log.info("{} | stages: {}", sw.shortSummary(), stageBreakdown(sw));
 
             if (visionResponse == null) {
                 log.warn("Vision model returned no response for {}", filename);
@@ -154,6 +154,12 @@ public class OllamaVisionService {
         String lower = s.toLowerCase();
         return lower.equals("names") || lower.equals("descriptions") || lower.equals("labels") ||
                 lower.equals("tags") || lower.equals("colors") || lower.equals("description");
+    }
+
+    private String stageBreakdown(StopWatch sw) {
+        return java.util.Arrays.stream(sw.getTaskInfo())
+                .map(info -> info.getTaskName() + "=" + info.getTimeMillis() + "ms")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     public record VisionImageAnalysis(

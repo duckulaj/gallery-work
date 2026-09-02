@@ -152,15 +152,10 @@ public class AiEnrichmentService {
             knownFaceMatches.addAndGet(intermediate.faceResult().matchedFaces());
         }
 
-        NsfwDetectionService detector = nsfwDetection.getIfAvailable();
-        if (detector != null) {
-            updateActiveStage(assetId, "NSFW detection");
-            try {
-                detector.analyseAsset(assetId);
-            } catch (Exception ex) {
-                log.warn("NSFW detection failed for asset {}: {}", assetId, ex.getMessage());
-            }
-        }
+        updateActiveStage(assetId, "NSFW queue");
+        long nsfwQueueStart = System.currentTimeMillis();
+        queueNsfwIfNeeded(assetId);
+        long nsfwQueueMs = System.currentTimeMillis() - nsfwQueueStart;
 
         updateActiveStage(assetId, "Embedding");
         long embedStart = System.currentTimeMillis();
@@ -169,7 +164,7 @@ public class AiEnrichmentService {
                     intermediate.snapshot(), intermediate.aiAnalysis(), intermediate.original()));
             long embedMs = System.currentTimeMillis() - embedStart;
             updateActiveStage(assetId, "Persistence");
-            persistAsset(intermediate, vector, embedMs);
+            persistAsset(intermediate, vector, embedMs, nsfwQueueMs);
         } catch (Exception ex) {
             log.error("Embedding failed for asset {}: {}", assetId, ex.getMessage());
             markFailed(assetId, ex);
@@ -255,7 +250,7 @@ public class AiEnrichmentService {
     }
 
     /** Persist pre-computed embedding and AI analysis to the DB. */
-    private void persistAsset(EnrichmentIntermediate ir, float[] vector, long embedMs) {
+    private void persistAsset(EnrichmentIntermediate ir, float[] vector, long embedMs, long nsfwQueueMs) {
         try {
             if (Thread.currentThread().isInterrupted()) {
                 throw new RuntimeException("Enrichment interrupted");
@@ -266,8 +261,7 @@ public class AiEnrichmentService {
                 return;
             }
 
-            log.info("{} | embed: {}ms", ir.sw().shortSummary(), embedMs);
-
+            long persistStart = System.currentTimeMillis();
             tx().executeWithoutResult(status -> {
                 Asset asset = assets.findById(ir.assetId()).orElseThrow();
                 AssetMetadata m = metas.findById(ir.assetId()).orElseGet(AssetMetadata::new);
@@ -320,6 +314,10 @@ public class AiEnrichmentService {
                         ir.assetId(), model, vector.length,
                         embed.toPgVectorLiteral(vector), vectorJson);
             });
+            long persistMs = System.currentTimeMillis() - persistStart;
+            log.info("{} | stages: {} | nsfw_queue: {}ms | embed: {}ms | persist: {}ms | total: {}ms",
+                    ir.sw().shortSummary(), stageBreakdown(ir.sw()), nsfwQueueMs, embedMs, persistMs,
+                    ir.sw().getTotalTimeMillis() + nsfwQueueMs + embedMs + persistMs);
         } catch (Exception ex) {
             markFailed(ir.assetId(), ex);
         } finally {
@@ -336,6 +334,28 @@ public class AiEnrichmentService {
         long now = System.currentTimeMillis();
         activeProcesses.computeIfPresent(assetId, (id, current) ->
                 new ActiveProcessState(current.filename(), stage, current.startedAtMs(), now));
+    }
+
+    private void queueNsfwIfNeeded(String assetId) {
+        NsfwDetectionService detector = nsfwDetection.getIfAvailable();
+        if (detector == null) {
+            return;
+        }
+        try {
+            if (detector.hasResult(assetId)) {
+                log.debug("NSFW detection already exists for asset {}; skipping enqueue", assetId);
+                return;
+            }
+            detector.queueAsset(assetId);
+        } catch (Exception ex) {
+            log.warn("Could not enqueue NSFW detection for asset {}: {}", assetId, ex.getMessage());
+        }
+    }
+
+    private String stageBreakdown(org.springframework.util.StopWatch sw) {
+        return java.util.Arrays.stream(sw.getTaskInfo())
+                .map(info -> info.getTaskName() + "=" + info.getTimeMillis() + "ms")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private record EnrichmentIntermediate(

@@ -18,17 +18,17 @@ class AppPropertiesTest {
                 420,
                 5000,
                 new AppProperties.Ai(
-                        new AppProperties.Background(true, 6, null, 4000, 0, 6),
+                        new AppProperties.Background(true, 6, null, 4000, 0, 6, 8, 512),
                         null,
                         null,
-                        new AppProperties.Nsfw(true, "http://localhost:8082", -0.1, 1.1,
+                        new AppProperties.Nsfw(true, 250, 16, 4, "http://localhost:8082", -0.1, 1.1,
                                 Path.of("/tmp/quarantine"))));
 
         try (var validatorFactory = Validation.buildDefaultValidatorFactory()) {
             var violations = validatorFactory.getValidator().validate(properties);
             assertThat(violations)
                     .extracting(violation -> violation.getPropertyPath().toString())
-                    .contains("ai.background.embeddingThreads", "ai.nsfw.reviewThreshold", "ai.nsfw.explicitThreshold");
+                    .contains("ai.background.workerThreads", "ai.nsfw.reviewThreshold", "ai.nsfw.explicitThreshold");
         }
     }
 
@@ -43,8 +43,15 @@ class AppPropertiesTest {
 
     @Test
     void resolvesLegacyAiBatchSizeAsMaxInFlight() {
-        var background = new AppProperties.Background(true, null, 8, 4000, 4, 6);
+        var background = new AppProperties.Background(true, null, 8, 4000, 4, 6, 8, 512);
 
         assertThat(background.effectiveMaxInFlight()).isEqualTo(8);
+    }
+
+    @Test
+    void resolvesLegacyEmbeddingThreadsAsWorkerThreads() {
+        var background = new AppProperties.Background(true, 6, null, 4000, null, 8, 8, 512);
+
+        assertThat(background.effectiveWorkerThreads()).isEqualTo(8);
     }
 }
