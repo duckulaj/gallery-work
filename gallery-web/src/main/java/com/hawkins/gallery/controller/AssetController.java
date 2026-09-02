@@ -22,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.hawkins.gallery.service.AiEnrichmentService;
 import com.hawkins.gallery.service.AssetService;
 import com.hawkins.gallery.service.FaceDetectionService;
+import com.hawkins.gallery.service.FaceRecognitionQueueService;
 import com.hawkins.gallery.service.KnownFaceService;
 import com.hawkins.gallery.service.SearchService;
 import com.hawkins.gallery.service.FileAccessPolicy;
@@ -45,6 +46,7 @@ public class AssetController {
     private final AiEnrichmentService aiEnrichment;
     private final KnownFaceService knownFaces;
     private final FaceDetectionService faceDetectionService;
+    private final FaceRecognitionQueueService faceRecognitionQueue;
     private final FileAccessPolicy fileAccessPolicy;
 
     @GetMapping("/assets")
@@ -135,12 +137,8 @@ public class AssetController {
 
     @PostMapping("/faces/queue-recognition")
     public String queueFaceRecognition(@RequestParam String folderId, @RequestParam(required = false) String q, Model model) {
-        var result = assets.reindexAi(folderId);
-        List<String> assetIds = assets.findByFolder(folderId).stream()
-                .map(a -> a.getId()).toList();
-        aiEnrichment.trackKnownFaceApplication(assetIds);
-        aiEnrichment.activateQueue();
-        model.addAttribute("notice", "Known faces updated. " + result.message());
+        var result = faceRecognitionQueue.queueFolder(folderId);
+        model.addAttribute("notice", result.message());
         model.addAttribute("assets", search.search(folderId, q));
         model.addAttribute("aiStats", aiEnrichment.stats());
         return "fragments/asset-grid :: grid";

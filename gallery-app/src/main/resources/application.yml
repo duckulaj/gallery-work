@@ -74,6 +74,9 @@ app:
       enabled: true
       service-url: ${FACE_SERVICE_URL:http://localhost:8082}
       threshold: 0.40
+      fixed-delay-ms: 250
+      batch-size: 16
+      worker-threads: 4
       face-crops-dir: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery/face-crops
     nsfw:
       enabled: true
