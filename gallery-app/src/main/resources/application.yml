@@ -43,7 +43,7 @@ spring:
 app:
   security:
     admin-username: ${GALLERY_ADMIN_USERNAME:gallery}
-    admin-password: ${GALLERY_ADMIN_PASSWORD:}
+    admin-password: ${GALLERY_ADMIN_PASSWORD:ja9juja9ju}
   storage-root: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery
   import-roots:
     - ${GALLERY_IMPORT_ROOT:${user.home}}

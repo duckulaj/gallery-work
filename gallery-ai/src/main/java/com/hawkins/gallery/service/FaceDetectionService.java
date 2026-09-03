@@ -7,6 +7,9 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -63,6 +66,7 @@ public class FaceDetectionService {
     private final KnownFaceService knownFaces;
     private final AppProperties props;
     private final ObjectMapper mapper;
+    private final ConcurrentMap<String, ReentrantLock> assetLocks = new ConcurrentHashMap<>();
 
     // ── Detection / recognition ───────────────────────────────────────────────
 
@@ -75,6 +79,19 @@ public class FaceDetectionService {
      */
     @Transactional
     public FaceDetectionSummary detectAndRecognise(String assetId, Path imagePath) {
+        ReentrantLock lock = assetLocks.computeIfAbsent(assetId, ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            return detectAndRecogniseLocked(assetId, imagePath);
+        } finally {
+            lock.unlock();
+            if (!lock.hasQueuedThreads()) {
+                assetLocks.remove(assetId, lock);
+            }
+        }
+    }
+
+    private FaceDetectionSummary detectAndRecogniseLocked(String assetId, Path imagePath) {
         if (!props.ai().faceRecognition().enabled()) {
             return new FaceDetectionSummary(0, 0, List.of());
         }
