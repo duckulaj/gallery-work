@@ -1,23 +1,31 @@
 package com.hawkins.gallery.controller;
 
-import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
+import com.hawkins.gallery.config.AppProperties;
+
 @Controller
 @SuppressWarnings("null")
 public class BrowseController {
 
-    /** Restrict browsing to the current user's home directory to prevent exposing system paths. */
-    private static final Path BROWSE_ROOT = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
+    private final List<Path> browseRoots;
+
+    public BrowseController(AppProperties properties) {
+        this.browseRoots = properties.importRoots().stream()
+                .map(this::realOrNormalized)
+                .distinct()
+                .toList();
+    }
 
     public record DirEntry(String name, String path) {
     }
@@ -25,44 +33,70 @@ public class BrowseController {
     @GetMapping("/browse")
     public String browse(@RequestParam(defaultValue = "") String path,
             Model model) {
-        Path requested = path.isBlank() ? BROWSE_ROOT
-                : Path.of(path).toAbsolutePath().normalize();
-
-        // Sandbox: never navigate above the browse root
-        if (!requested.startsWith(BROWSE_ROOT)) {
-            requested = BROWSE_ROOT;
-        }
-
-        File dir = requested.toFile();
-        if (!dir.exists() || !dir.isDirectory()) {
-            dir = BROWSE_ROOT.toFile();
-        }
-
-        String canonical;
+        Path fallback = browseRoots.getFirst();
+        Path resolvedRequested;
         try {
-            canonical = dir.getCanonicalPath();
-        } catch (Exception e) {
-            canonical = dir.getAbsolutePath();
+            resolvedRequested = path.isBlank() ? fallback : Path.of(path).toRealPath();
+        } catch (Exception ex) {
+            resolvedRequested = fallback;
         }
 
-        // Parent stays within the browse root
+        Path activeRoot = browseRoots.stream()
+                .filter(resolvedRequested::startsWith)
+                .max(Comparator.comparingInt(Path::getNameCount))
+                .orElse(fallback);
+        Path requested = resolvedRequested.startsWith(activeRoot) && Files.isDirectory(resolvedRequested)
+                ? resolvedRequested : activeRoot;
+
         Path parentPath = requested.getParent();
-        String parent = (parentPath != null && parentPath.startsWith(BROWSE_ROOT))
+        String parent = (parentPath != null && parentPath.startsWith(activeRoot))
                 ? parentPath.toString() : null;
 
-        // Build simple string-based entries so Thymeleaf never calls getCanonicalPath()
-        File[] children = dir.listFiles(f -> f.isDirectory() && !f.isHidden());
-        List<DirEntry> subdirs = children == null ? List.of()
-                : Arrays.stream(children)
-                        // Skip symlinks to prevent escaping the sandbox
-                        .filter(f -> !Files.isSymbolicLink(f.toPath()))
-                        .sorted(Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER))
-                        .map(f -> new DirEntry(f.getName(), f.getAbsolutePath()))
-                        .toList();
+        List<DirEntry> subdirs = listDirectories(requested, activeRoot);
 
-        model.addAttribute("currentPath", canonical);
+        model.addAttribute("browseRoots", browseRoots.stream()
+                .map(root -> new DirEntry(root.toString(), root.toString()))
+                .toList());
+        model.addAttribute("currentPath", requested.toString());
         model.addAttribute("parentPath", parent);
         model.addAttribute("subdirs", subdirs);
         return "fragments/folder-picker :: picker-content";
+    }
+
+    private List<DirEntry> listDirectories(Path directory, Path activeRoot) {
+        try (Stream<Path> children = Files.list(directory)) {
+            return children
+                    .filter(this::isVisibleDirectory)
+                    .map(this::realOrNull)
+                    .filter(java.util.Objects::nonNull)
+                    .filter(child -> child.startsWith(activeRoot))
+                    .sorted(Comparator.comparing(child -> child.getFileName().toString(),
+                            String.CASE_INSENSITIVE_ORDER))
+                    .map(child -> new DirEntry(child.getFileName().toString(), child.toString()))
+                    .toList();
+        } catch (IOException | SecurityException ex) {
+            return List.of();
+        }
+    }
+
+    private boolean isVisibleDirectory(Path path) {
+        try {
+            return Files.isDirectory(path) && !Files.isHidden(path);
+        } catch (IOException | SecurityException ex) {
+            return false;
+        }
+    }
+
+    private Path realOrNull(Path path) {
+        try {
+            return path.toRealPath();
+        } catch (IOException | SecurityException ex) {
+            return null;
+        }
+    }
+
+    private Path realOrNormalized(Path path) {
+        Path real = realOrNull(path);
+        return real != null ? real : path.toAbsolutePath().normalize();
     }
 }

@@ -70,6 +70,14 @@ From the extracted project root:
 ./run-gallery.sh
 ```
 
+The launcher uses the same local development database credentials as the VS
+Code launch profile. Override them when your PostgreSQL role uses a different
+password:
+
+```bash
+GALLERY_DB_PASSWORD='your-password' ./run-gallery.sh
+```
+
 Or start infrastructure and Java separately:
 
 ```bash
@@ -83,6 +91,10 @@ Build the executable JAR:
 ./build.sh
 java -jar gallery-app/target/gallery-app-1.0.0-SNAPSHOT.jar
 ```
+
+By default, `build.sh` deploys `GalleryApp.jar`, all shell scripts, the Docker
+Compose file, and the complete face-service build context to
+`/home/jonathan/Gallery`. Set `DEST_DIR` to deploy elsewhere.
 
 ## Application addresses
 
@@ -116,6 +128,8 @@ Defaults are in `gallery-app/src/main/resources/application.yml`. They can be ov
 - `GALLERY_DB_URL`
 - `GALLERY_DB_USERNAME`
 - `GALLERY_DB_PASSWORD`
+- `GALLERY_IMPORT_ROOT` (defaults to the current user's home directory)
+- `GALLERY_MOUNT_ROOT` (defaults to `/mnt`, allowing mounted folders such as `/mnt/backup`)
 - `FACE_SERVICE_URL`
 - `OLLAMA_BASE_URL`
 

@@ -19,14 +19,27 @@ DEST_JAR="$DEST_DIR/GalleryApp.jar"
 
 mkdir -p "$DEST_DIR"
 cp "$JAR" "$DEST_JAR"
-cp run-gallery.sh "$DEST_DIR/run-gallery.sh"
-mkdir -p "$DEST_DIR/scripts" "$DEST_DIR/face-service"
-cp scripts/start-infrastructure.sh "$DEST_DIR/scripts/start-infrastructure.sh"
 cp docker-compose.yml "$DEST_DIR/docker-compose.yml"
-cp face-service/Dockerfile face-service/main.py face-service/requirements.txt "$DEST_DIR/face-service/"
-chmod +x "$DEST_DIR/run-gallery.sh"
-chmod +x "$DEST_DIR/scripts/start-infrastructure.sh"
+
+# Copy every shell script while preserving its path in the deployment folder.
+# This keeps newly added runtime scripts from being omitted from future builds.
+while IFS= read -r -d '' source; do
+    destination="$DEST_DIR/$source"
+    mkdir -p "$(dirname "$destination")"
+    cp "$source" "$destination"
+    chmod +x "$destination"
+done < <(find . -maxdepth 2 -type f -name '*.sh' \
+    ! -path './target/*' -print0)
+
+# Copy the complete face-service build context, excluding generated Python
+# caches. Preserve subdirectories in case models or configuration are added.
+while IFS= read -r -d '' source; do
+    destination="$DEST_DIR/$source"
+    mkdir -p "$(dirname "$destination")"
+    cp "$source" "$destination"
+done < <(find face-service -type f \
+    ! -path '*/__pycache__/*' ! -name '*.pyc' -print0)
 
 echo "Deployed JAR to $DEST_JAR"
-echo "Copied launcher to $DEST_DIR/run-gallery.sh"
-echo "Copied runtime infrastructure files to $DEST_DIR"
+echo "Copied shell scripts and runtime infrastructure files to $DEST_DIR"
+echo "Copied face-service build context to $DEST_DIR/face-service"

@@ -7,6 +7,18 @@
   <!-- Current path breadcrumb -->
   <div class="fp-path" th:text="${currentPath}"></div>
 
+  <div class="fp-roots">
+    <button class="fp-dir"
+            type="button"
+            th:each="root : ${browseRoots}"
+            th:hx-get="@{/browse(path=${root.path})}"
+            hx-target="#picker-content"
+            hx-swap="outerHTML">
+      <i class="bi bi-device-hdd"></i>
+      <span th:text="${root.name}"></span>
+    </button>
+  </div>
+
   <!-- Directory list -->
   <ul class="fp-list">
 

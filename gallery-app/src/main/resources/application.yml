@@ -47,6 +47,7 @@ app:
   storage-root: ${GALLERY_DATA_ROOT:${user.home}/Gallery-App/data}/gallery
   import-roots:
     - ${GALLERY_IMPORT_ROOT:${user.home}}
+    - ${GALLERY_MOUNT_ROOT:/mnt}
   thumbnail-size: 420
   semantic-candidate-limit: 5000
   ai:
