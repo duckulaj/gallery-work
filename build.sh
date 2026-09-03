@@ -16,8 +16,31 @@ fi
 echo "Build successful: $JAR"
 DEST_DIR="${DEST_DIR:-/home/jonathan/Gallery}"
 DEST_JAR="$DEST_DIR/GalleryApp.jar"
+FACE_SERVICE_CHANGED=0
+
+fingerprint_face_service() {
+    local root="$1"
+    if [[ ! -d "$root/face-service" ]]; then
+        echo "missing"
+        return
+    fi
+    (
+        cd "$root"
+        find face-service -type f \
+            ! -path '*/__pycache__/*' ! -name '*.pyc' \
+            -print0 \
+            | sort -z \
+            | xargs -0 sha256sum
+    )
+}
 
 mkdir -p "$DEST_DIR"
+source_face_service_fingerprint="$(fingerprint_face_service ".")"
+deployed_face_service_fingerprint="$(fingerprint_face_service "$DEST_DIR")"
+if [[ "$source_face_service_fingerprint" != "$deployed_face_service_fingerprint" ]]; then
+    FACE_SERVICE_CHANGED=1
+fi
+
 cp "$JAR" "$DEST_JAR"
 cp docker-compose.yml "$DEST_DIR/docker-compose.yml"
 
@@ -33,6 +56,11 @@ done < <(find . -maxdepth 2 -type f -name '*.sh' \
 
 # Copy the complete face-service build context, excluding generated Python
 # caches. Preserve subdirectories in case models or configuration are added.
+repo_dir="$(pwd -P)"
+deploy_dir="$(cd "$DEST_DIR" && pwd -P)"
+if [[ "$deploy_dir" != "$repo_dir" ]]; then
+    rm -rf "$DEST_DIR/face-service"
+fi
 while IFS= read -r -d '' source; do
     destination="$DEST_DIR/$source"
     mkdir -p "$(dirname "$destination")"
@@ -43,3 +71,13 @@ done < <(find face-service -type f \
 echo "Deployed JAR to $DEST_JAR"
 echo "Copied shell scripts and runtime infrastructure files to $DEST_DIR"
 echo "Copied face-service build context to $DEST_DIR/face-service"
+
+if [[ "$FACE_SERVICE_CHANGED" -eq 1 ]]; then
+    echo "Face-service files changed; rebuilding Docker image and recreating container..."
+    (
+        cd "$DEST_DIR"
+        docker compose up -d --build --force-recreate face-service
+    )
+else
+    echo "Face-service files unchanged; Docker rebuild not required."
+fi

@@ -14,7 +14,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -27,12 +30,14 @@ import com.hawkins.gallery.domain.AiStatus;
 import com.hawkins.gallery.domain.Asset;
 import com.hawkins.gallery.domain.AssetMetadata;
 import com.hawkins.gallery.domain.Folder;
+import com.hawkins.gallery.domain.ImportFailure;
 import com.hawkins.gallery.event.AssetIndexedEvent;
 import com.hawkins.gallery.config.AppProperties;
 import com.hawkins.gallery.repository.AssetEmbeddingRepository;
 import com.hawkins.gallery.repository.AssetMetadataRepository;
 import com.hawkins.gallery.repository.AssetRepository;
 import com.hawkins.gallery.repository.FolderRepository;
+import com.hawkins.gallery.repository.ImportFailureRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,18 +55,25 @@ public class AssetService {
     private final AssetRepository assets;
     private final AssetMetadataRepository metas;
     private final AssetEmbeddingRepository embeddings;
+    private final ImportFailureRepository importFailures;
     private final ImageService images;
     private final AppProperties properties;
     private final PlatformTransactionManager transactionManager;
     private final AlbumService albumService;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private TransactionTemplate requiresNewTx;
 
     @jakarta.annotation.PostConstruct
     private void init() {
         requiresNewTx = new TransactionTemplate(transactionManager);
         requiresNewTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
+    @EventListener(ContextClosedEvent.class)
+    public void onContextClosed() {
+        shuttingDown.set(true);
     }
 
     @Transactional
@@ -96,40 +108,64 @@ public class AssetService {
             TreeScan tree = scanTree(root, maxDepth);
             Set<Path> foldersToSkip = foldersToSkip(root, tree.directories(), tree.images(), recursive);
             Map<String, Folder> albumByDir = resolveAlbums(root, rootAlbum, tree.directories(), foldersToSkip, recursive);
-            Set<AssetIdentity> knownAssets = new HashSet<>();
+            Set<AssetIdentity> knownChecksums = new HashSet<>();
+            Set<AssetIdentity> knownPaths = new HashSet<>();
             assets.findByFolderIdIn(albumByDir.values().stream().map(Folder::getId).collect(java.util.stream.Collectors.toSet()))
                     .forEach(asset -> {
-                        knownAssets.add(new AssetIdentity(asset.getFolder().getId(), asset.getChecksum(), null));
-                        knownAssets.add(new AssetIdentity(asset.getFolder().getId(), null, asset.getStoragePath()));
+                        knownChecksums.add(new AssetIdentity(asset.getFolder().getId(), asset.getChecksum()));
+                        knownPaths.add(new AssetIdentity(asset.getFolder().getId(), asset.getStoragePath()));
                     });
             List<Path> candidates = tree.images().stream()
                         .filter(p -> !isUnderFolderToSkip(p, foldersToSkip))
                         .sorted()
                         .toList();
+            Map<String, ImportFailure> knownFailures = knownFailuresFor(candidates);
 
             for (Path image : candidates) {
+                if (indexingShouldStop()) {
+                    log.info("Directory indexing stopped early for {} because application shutdown is in progress", root);
+                    break;
+                }
                 try {
-                    String checksum = images.sha256(image);
                     Path normalized = image.toAbsolutePath().normalize();
                     String targetFolderId = albumByDir.getOrDefault(
                             normalized.getParent().toAbsolutePath().normalize().toString(), rootAlbum).getId();
-                    if (knownAssets.contains(new AssetIdentity(targetFolderId, checksum, null))
-                            || knownAssets.contains(new AssetIdentity(targetFolderId, null, normalized.toString()))) {
+                    String storagePath = normalized.toString();
+                    if (knownPaths.contains(new AssetIdentity(targetFolderId, storagePath))) {
+                        skipped++;
+                        continue;
+                    }
+                    FileFingerprint fingerprint = fingerprint(normalized);
+                    ImportFailure knownFailure = knownFailures.get(storagePath);
+                    if (knownFailure != null
+                            && knownFailure.getSizeBytes() == fingerprint.sizeBytes()
+                            && knownFailure.getLastModifiedAt().equals(fingerprint.lastModifiedAt())) {
+                        skipped++;
+                        continue;
+                    }
+                    String checksum = images.sha256(image);
+                    if (knownChecksums.contains(new AssetIdentity(targetFolderId, checksum))) {
                         skipped++;
                         continue;
                     }
                     newAssetTransaction().executeWithoutResult(status ->
                             createAssetInternal(targetFolderId, normalized, image.getFileName().toString(),
                                     contentType(image), checksum));
-                    knownAssets.add(new AssetIdentity(targetFolderId, checksum, null));
-                    knownAssets.add(new AssetIdentity(targetFolderId, null, normalized.toString()));
+                    importFailures.deleteById(storagePath);
+                    knownFailures.remove(storagePath);
+                    knownChecksums.add(new AssetIdentity(targetFolderId, checksum));
+                    knownPaths.add(new AssetIdentity(targetFolderId, storagePath));
                     indexed++;
                 } catch (DataIntegrityViolationException ex) {
                     // Concurrent indexing already inserted this asset; treat as skipped
                     log.debug("Skipping duplicate asset {} (concurrent insert)", image);
                     skipped++;
                 } catch (RuntimeException ex) {
-                    log.warn("Failed to index {}", image, ex);
+                    if (indexingShouldStop()) {
+                        log.info("Directory indexing stopped while processing {} because application shutdown is in progress", image);
+                        break;
+                    }
+                    recordImportFailure(image, ex);
                     failed++;
                 }
             }
@@ -215,6 +251,82 @@ public class AssetService {
 
     private TransactionTemplate newAssetTransaction() {
         return requiresNewTx;
+    }
+
+    private boolean indexingShouldStop() {
+        return shuttingDown.get() || Thread.currentThread().isInterrupted();
+    }
+
+    private FileFingerprint fingerprint(Path path) {
+        try {
+            return new FileFingerprint(Files.size(path), Files.getLastModifiedTime(path).toInstant());
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not stat import candidate " + path, e);
+        }
+    }
+
+    private Map<String, ImportFailure> knownFailuresFor(List<Path> candidates) {
+        Map<String, ImportFailure> failures = new HashMap<>();
+        List<String> paths = candidates.stream()
+                .map(path -> path.toAbsolutePath().normalize().toString())
+                .distinct()
+                .toList();
+        int chunkSize = 1_000;
+        for (int start = 0; start < paths.size(); start += chunkSize) {
+            int end = Math.min(start + chunkSize, paths.size());
+            importFailures.findBySourcePathIn(paths.subList(start, end))
+                    .forEach(failure -> failures.put(failure.getSourcePath(), failure));
+        }
+        return failures;
+    }
+
+    private void recordImportFailure(Path image, RuntimeException ex) {
+        Throwable root = rootCause(ex);
+        boolean expectedDecodeFailure = isExpectedDecodeFailure(root);
+        String reason = expectedDecodeFailure ? root.getMessage() : ex.getMessage();
+        if (reason == null || reason.isBlank()) {
+            reason = root.getClass().getSimpleName();
+        }
+        String finalReason = reason;
+        if (expectedDecodeFailure) {
+            log.warn("Failed to index {}: {}", image, finalReason);
+        } else {
+            log.warn("Failed to index {}", image, ex);
+        }
+        try {
+            Path normalized = image.toAbsolutePath().normalize();
+            FileFingerprint fingerprint = fingerprint(normalized);
+            String detail = root.getClass().getName() + ": " + finalReason;
+            newAssetTransaction().executeWithoutResult(status ->
+                    importFailures.save(new ImportFailure(normalized.toString(), fingerprint.sizeBytes(),
+                            fingerprint.lastModifiedAt(), truncate(finalReason, 255), detail)));
+        } catch (RuntimeException failureRecordingEx) {
+            if (!indexingShouldStop()) {
+                log.debug("Could not persist import failure for {}: {}", image, failureRecordingEx.getMessage());
+            }
+        }
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private boolean isExpectedDecodeFailure(Throwable throwable) {
+        if (throwable instanceof IOException) {
+            String message = throwable.getMessage();
+            return message != null
+                    && (message.contains("Unsupported or corrupt image")
+                    || message.contains("Invalid icc profile"));
+        }
+        return false;
+    }
+
+    private String truncate(String value, int maxLength) {
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 
     private Asset createAssetInternal(String folderId, Path original, String filename, String contentType,
@@ -399,6 +511,7 @@ public class AssetService {
         }
     }
 
-    private record AssetIdentity(String folderId, String checksum, String storagePath) { }
+    private record AssetIdentity(String folderId, String value) { }
+    private record FileFingerprint(long sizeBytes, Instant lastModifiedAt) { }
     private record TreeScan(List<Path> directories, List<Path> images) { }
 }
